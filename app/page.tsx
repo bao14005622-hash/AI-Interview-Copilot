@@ -68,13 +68,13 @@ export default function Home() {
         body: formData,
       });
 
-      const payload = await response.json();
+      const payload = await parseAnalyzeResponse(response);
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Analysis failed.");
+        throw new Error(payload.error || "分析失败，请重试。");
       }
 
-      setResult(payload);
+      setResult(payload.data);
     } catch (analysisError) {
       setError(
         analysisError instanceof Error
@@ -280,6 +280,36 @@ export default function Home() {
       </div>
     </main>
   );
+}
+
+async function parseAnalyzeResponse(response: Response) {
+  const responseText = await response.text();
+
+  try {
+    const parsed = JSON.parse(responseText);
+
+    if (!response.ok) {
+      return {
+        error:
+          typeof parsed?.error === "string"
+            ? parsed.error
+            : "分析失败，请重试。",
+        data: null,
+      };
+    }
+
+    return {
+      error: "",
+      data: parsed as AnalysisResult,
+    };
+  } catch {
+    return {
+      error: response.ok
+        ? "分析结果格式异常，请重试。"
+        : "线上服务暂时不可用，请稍后重试。",
+      data: null,
+    };
+  }
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

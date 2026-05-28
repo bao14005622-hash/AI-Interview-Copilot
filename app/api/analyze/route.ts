@@ -20,7 +20,7 @@ type CandidateAnalysis = {
 
 export const runtime = "nodejs";
 const pdfWorkerUrl = pathToFileURL(
-  `${process.cwd()}/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs`,
+  `${process.cwd()}/node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs`,
 ).toString();
 
 export async function POST(request: NextRequest) {
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "分析失败，请重试。" },
+      { error: "服务端分析失败，请稍后重试。" },
       { status: 500 },
     );
   }
