@@ -193,7 +193,7 @@ async function readAnalyzeRequest(request: NextRequest) {
       resumeFile instanceof File ? await extractResumeText(resumeFile) : "";
 
     return {
-      resumeText: fileResumeText || pastedResumeText,
+      resumeText: pastedResumeText || fileResumeText,
       jobDescription,
       interviewerPreferences,
     };
@@ -249,7 +249,7 @@ async function extractPdfText(buffer: Buffer) {
     disableFontFace: true,
     isEvalSupported: false,
     useWorkerFetch: false,
-  });
+  } as unknown as Parameters<typeof pdfjs.getDocument>[0]);
 
   const document = await loadingTask.promise;
 
