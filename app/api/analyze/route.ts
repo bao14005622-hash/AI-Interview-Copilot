@@ -243,7 +243,16 @@ async function extractResumeText(file: File) {
 class UserFacingError extends Error {}
 
 async function extractPdfText(buffer: Buffer) {
+  ensurePromiseWithResolvers();
+
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  (
+    globalThis as typeof globalThis & {
+      pdfjsWorker?: typeof pdfjsWorker;
+    }
+  ).pdfjsWorker = pdfjsWorker;
+
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(buffer),
     disableFontFace: true,
@@ -275,4 +284,27 @@ async function extractPdfText(buffer: Buffer) {
   } finally {
     await document.destroy();
   }
+}
+
+function ensurePromiseWithResolvers() {
+  const promiseConstructor = Promise as unknown as {
+    withResolvers?: <T>() => {
+      promise: Promise<T>;
+      resolve: (value: T | PromiseLike<T>) => void;
+      reject: (reason?: unknown) => void;
+    };
+  };
+
+  if (promiseConstructor.withResolvers) return;
+
+  promiseConstructor.withResolvers = function withResolvers<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((promiseResolve, promiseReject) => {
+      resolve = promiseResolve;
+      reject = promiseReject;
+    });
+
+    return { promise, resolve, reject };
+  };
 }

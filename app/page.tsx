@@ -21,7 +21,6 @@ export default function Home() {
   const [preferences, setPreferences] = useState("");
   const [resumeText, setResumeText] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
-  const [isExtractingResume, setIsExtractingResume] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -32,31 +31,11 @@ export default function Home() {
     return "暂未选择简历";
   }, [resumeFile, resumeText]);
 
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     setResumeFile(file);
     setError("");
-
-    if (isPdfFile(file)) {
-      setIsExtractingResume(true);
-
-      try {
-        const extractedText = await extractPdfTextInBrowser(file);
-
-        if (!extractedText) {
-          setError("未能从 PDF 中提取到文本，请尝试粘贴简历文本。");
-          return;
-        }
-
-        setResumeText(extractedText);
-      } catch (pdfError) {
-        console.error("PDF extraction failed:", pdfError);
-        setError("PDF 解析失败，请尝试粘贴简历文本。");
-      } finally {
-        setIsExtractingResume(false);
-      }
-    }
   }
 
   async function handleAnalyze() {
@@ -72,11 +51,6 @@ export default function Home() {
       return;
     }
 
-    if (isExtractingResume) {
-      setError("正在读取 PDF 简历，请稍等。");
-      return;
-    }
-
     setIsAnalyzing(true);
 
     try {
@@ -85,7 +59,7 @@ export default function Home() {
       formData.append("jobDescription", jd.trim());
       formData.append("interviewerPreferences", preferences.trim());
 
-      if (resumeFile && !(isPdfFile(resumeFile) && resumeText.trim())) {
+      if (resumeFile && !resumeText.trim()) {
         formData.append("resumeFile", resumeFile);
       }
 
@@ -269,14 +243,10 @@ export default function Home() {
               <button
                 type="button"
                 onClick={handleAnalyze}
-                disabled={isAnalyzing || isExtractingResume}
+                disabled={isAnalyzing}
                 className="min-h-12 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:shadow-none"
               >
-                {isExtractingResume
-                  ? "正在读取 PDF..."
-                  : isAnalyzing
-                    ? "正在分析候选人..."
-                    : "分析候选人"}
+                {isAnalyzing ? "正在分析候选人..." : "分析候选人"}
               </button>
             </div>
           </div>
@@ -339,39 +309,6 @@ async function parseAnalyzeResponse(response: Response) {
         : "线上服务暂时不可用，请稍后重试。",
       data: null,
     };
-  }
-}
-
-function isPdfFile(file: File) {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
-
-async function extractPdfTextInBrowser(file: File) {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
-
-  const arrayBuffer = await file.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(arrayBuffer),
-    disableFontFace: true,
-    isEvalSupported: false,
-  } as unknown as Parameters<typeof pdfjs.getDocument>[0]);
-  const document = await loadingTask.promise;
-
-  try {
-    const pageTexts = await Promise.all(
-      Array.from({ length: document.numPages }, async (_, index) => {
-        const page = await document.getPage(index + 1);
-        const textContent = await page.getTextContent();
-        return textContent.items
-          .map((item) => ("str" in item ? item.str : ""))
-          .join(" ");
-      }),
-    );
-
-    return pageTexts.join("\n").trim();
-  } finally {
-    await document.destroy();
   }
 }
 
