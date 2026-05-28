@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
-import { pathToFileURL } from "node:url";
 
 type AnalyzeRequest = {
   resumeText?: string;
@@ -220,28 +219,7 @@ async function extractResumeText(file: File) {
   const buffer = Buffer.from(arrayBuffer);
 
   if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
-    const { PDFParse } = await import("pdf-parse");
-    const pdfWorkerUrl = pathToFileURL(
-      `${process.cwd()}/node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs`,
-    ).toString();
-
-    PDFParse.setWorker(pdfWorkerUrl);
-    const parser = new PDFParse({ data: buffer });
-
-    try {
-      const parsedPdf = await parser.getText();
-      const text = parsedPdf.text.trim();
-
-      if (!text) {
-        throw new UserFacingError(
-          "未能从 PDF 中提取到文本，请尝试粘贴简历文本。",
-        );
-      }
-
-      return text;
-    } finally {
-      await parser.destroy();
-    }
+    return extractPdfText(buffer);
   }
 
   if (
@@ -263,3 +241,38 @@ async function extractResumeText(file: File) {
 }
 
 class UserFacingError extends Error {}
+
+async function extractPdfText(buffer: Buffer) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    disableFontFace: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+  });
+
+  const document = await loadingTask.promise;
+
+  try {
+    const pageTexts = await Promise.all(
+      Array.from({ length: document.numPages }, async (_, index) => {
+        const page = await document.getPage(index + 1);
+        const textContent = await page.getTextContent();
+        return textContent.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" ");
+      }),
+    );
+    const text = pageTexts.join("\n").trim();
+
+    if (!text) {
+      throw new UserFacingError(
+        "未能从 PDF 中提取到文本，请尝试粘贴简历文本。",
+      );
+    }
+
+    return text;
+  } finally {
+    await document.destroy();
+  }
+}
