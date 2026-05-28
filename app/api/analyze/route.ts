@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
 import { pathToFileURL } from "node:url";
 
 type AnalyzeRequest = {
@@ -19,9 +18,6 @@ type CandidateAnalysis = {
 };
 
 export const runtime = "nodejs";
-const pdfWorkerUrl = pathToFileURL(
-  `${process.cwd()}/node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs`,
-).toString();
 
 export async function POST(request: NextRequest) {
   try {
@@ -224,6 +220,11 @@ async function extractResumeText(file: File) {
   const buffer = Buffer.from(arrayBuffer);
 
   if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
+    const { PDFParse } = await import("pdf-parse");
+    const pdfWorkerUrl = pathToFileURL(
+      `${process.cwd()}/node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs`,
+    ).toString();
+
     PDFParse.setWorker(pdfWorkerUrl);
     const parser = new PDFParse({ data: buffer });
 
