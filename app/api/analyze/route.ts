@@ -255,6 +255,7 @@ class UserFacingError extends Error {}
 
 async function extractPdfText(buffer: Buffer) {
   ensurePromiseWithResolvers();
+  await ensurePdfCanvasPolyfills();
 
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
@@ -294,6 +295,27 @@ async function extractPdfText(buffer: Buffer) {
     return text;
   } finally {
     await document.destroy();
+  }
+}
+
+async function ensurePdfCanvasPolyfills() {
+  try {
+    const canvas = await import("@napi-rs/canvas");
+    const globalScope = globalThis as unknown as Record<string, unknown>;
+
+    if (!globalScope.DOMMatrix && canvas.DOMMatrix) {
+      globalScope.DOMMatrix = canvas.DOMMatrix;
+    }
+
+    if (!globalScope.ImageData && canvas.ImageData) {
+      globalScope.ImageData = canvas.ImageData;
+    }
+
+    if (!globalScope.Path2D && canvas.Path2D) {
+      globalScope.Path2D = canvas.Path2D;
+    }
+  } catch (error) {
+    console.warn("PDF canvas polyfills are unavailable:", error);
   }
 }
 
