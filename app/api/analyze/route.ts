@@ -128,6 +128,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
+    if (request.nextUrl.searchParams.get("debug") === "1") {
+      return NextResponse.json(
+        { error: getErrorMessage(error) },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json(
       { error: "服务端分析失败，请稍后重试。" },
       { status: 500 },
@@ -175,6 +182,10 @@ function normalizeRecommendation(
   }
 
   throw new Error("Invalid DeepSeek recommendation response.");
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown server error";
 }
 
 async function readAnalyzeRequest(request: NextRequest) {
