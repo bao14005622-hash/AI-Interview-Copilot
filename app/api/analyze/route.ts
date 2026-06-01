@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
 
-type AnalyzeRequest = {
-  resumeText?: string;
-  jobDescription?: string;
-  interviewerPreferences?: string;
+type CandidateResume = {
+  fileName: string;
+  text: string;
 };
 
 type CandidateAnalysis = {
+  candidateName: string;
+  fileName: string;
   matchScore: number;
   matchLevel: string;
   strengths: string[];
@@ -16,18 +17,24 @@ type CandidateAnalysis = {
   recommendationReason: string;
 };
 
+type BatchAnalysis = {
+  candidates: CandidateAnalysis[];
+};
+
 export const runtime = "nodejs";
+
+const MAX_RESUME_COUNT = 20;
+const MAX_RESUME_TEXT_LENGTH = 7000;
 
 export async function POST(request: NextRequest) {
   try {
     const requestData = await readAnalyzeRequest(request);
-    const resumeText = requestData.resumeText.trim();
     const jobDescription = requestData.jobDescription.trim();
     const interviewerPreferences = requestData.interviewerPreferences.trim();
 
-    if (!resumeText) {
+    if (!requestData.resumes.length) {
       return NextResponse.json(
-        { error: "请上传 PDF/DOCX 或粘贴候选人简历文本。" },
+        { error: "请先批量上传候选人简历。" },
         { status: 400 },
       );
     }
@@ -60,37 +67,15 @@ export async function POST(request: NextRequest) {
             {
               role: "system",
               content:
-                "You are an expert recruiting analyst for HR users. Return only valid JSON. Be fair, avoid protected-class assumptions, and identify missing evidence as risks instead of inventing facts.",
+                "You are an expert recruiting analyst for HR users. Return only valid JSON. Be fair, avoid protected-class assumptions, compare candidates against the same job description and preference priority, and identify missing evidence as risks instead of inventing facts.",
             },
             {
               role: "user",
-              content: [
-                "请基于以下候选人简历文本、岗位描述和面试官偏好进行招聘匹配分析。",
-                "你必须返回 JSON 对象，不要使用 Markdown，不要包裹代码块。",
-                "",
-                "JSON 格式必须严格为：",
-                "{",
-                '  "matchScore": number,',
-                '  "matchLevel": "Strong Match" | "Medium Match" | "Weak Match",',
-                '  "strengths": string[],',
-                '  "risks": string[],',
-                '  "recommendation": "Yes" | "Maybe" | "No",',
-                '  "recommendationReason": string',
-                "}",
-                "",
-                "输出要求：",
-                "- matchScore 必须是 0 到 100 的数字。",
-                "- strengths 输出 3 到 6 个简洁中文短语。",
-                "- risks 输出 2 到 6 个简洁中文短语。",
-                "- recommendation 只能是 Yes、Maybe 或 No。",
-                "- recommendationReason 使用中文，说明推荐原因和需要面试验证的点。",
-                "",
-                `候选人简历：\n${resumeText}`,
-                "",
-                `岗位描述：\n${jobDescription}`,
-                "",
-                `面试官偏好：\n${interviewerPreferences || "未填写"}`,
-              ].join("\n"),
+              content: buildBatchAnalysisPrompt({
+                resumes: requestData.resumes,
+                jobDescription,
+                interviewerPreferences,
+              }),
             },
           ],
           response_format: { type: "json_object" },
@@ -101,9 +86,9 @@ export async function POST(request: NextRequest) {
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
-      console.error("DeepSeek analysis request failed:", errorText);
+      console.error("DeepSeek batch analysis request failed:", errorText);
       return NextResponse.json(
-        { error: "分析失败，请重试。" },
+        { error: "批量分析失败，请重试。" },
         { status: 502 },
       );
     }
@@ -114,15 +99,19 @@ export async function POST(request: NextRequest) {
     if (typeof rawText !== "string") {
       console.error("Unexpected DeepSeek response:", data);
       return NextResponse.json(
-        { error: "分析失败，请重试。" },
+        { error: "批量分析失败，请重试。" },
         { status: 502 },
       );
     }
 
-    const analysis = parseAndValidateAnalysis(rawText);
+    const analysis = parseAndValidateBatchAnalysis(
+      rawText,
+      requestData.resumes.map((resume) => resume.fileName),
+    );
+
     return NextResponse.json(analysis);
   } catch (error) {
-    console.error("Candidate analysis failed:", error);
+    console.error("Batch candidate analysis failed:", error);
 
     if (error instanceof UserFacingError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -135,35 +124,142 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function parseAndValidateAnalysis(rawText: string): CandidateAnalysis {
+function buildBatchAnalysisPrompt({
+  resumes,
+  jobDescription,
+  interviewerPreferences,
+}: {
+  resumes: CandidateResume[];
+  jobDescription: string;
+  interviewerPreferences: string;
+}) {
+  const preferenceLines = interviewerPreferences
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const preferencePriority = preferenceLines.length
+    ? preferenceLines
+        .map((line, index) => `${index + 1}. ${line}`)
+        .join("\n")
+    : "未填写";
+
+  const resumeBlocks = resumes
+    .map(
+      (resume, index) => [
+        `候选人 ${index + 1}`,
+        `文件名：${resume.fileName}`,
+        "简历文本：",
+        resume.text.slice(0, MAX_RESUME_TEXT_LENGTH),
+      ].join("\n"),
+    )
+    .join("\n\n---\n\n");
+
+  return [
+    "请基于同一个岗位 JD 和同一组面试官偏好，对多位候选人进行横向比较、评分和排序。",
+    "你必须返回 JSON 对象，不要使用 Markdown，不要包裹代码块。",
+    "",
+    "JSON 格式必须严格为：",
+    "{",
+    '  "candidates": [',
+    "    {",
+    '      "candidateName": string,',
+    '      "fileName": string,',
+    '      "matchScore": number,',
+    '      "matchLevel": "Strong Match" | "Medium Match" | "Weak Match",',
+    '      "strengths": string[],',
+    '      "risks": string[],',
+    '      "recommendation": "Yes" | "Maybe" | "No",',
+    '      "recommendationReason": string',
+    "    }",
+    "  ]",
+    "}",
+    "",
+    "输出要求：",
+    "- candidates 必须包含每一份简历对应的一位候选人，不要遗漏。",
+    "- candidates 必须按 matchScore 从高到低排序。",
+    "- candidateName 尽量从简历中提取真实姓名，无法确认时使用“候选人 X”。",
+    "- fileName 必须使用输入中的原始文件名。",
+    "- matchScore 必须是 0 到 100 的数字。",
+    "- strengths 输出 2 到 4 个简洁中文短语。",
+    "- risks 输出 2 到 4 个简洁中文短语。",
+    "- recommendation 只能是 Yes、Maybe 或 No。",
+    "- recommendationReason 使用中文，一句话说明推荐或不推荐的主要原因。",
+    "- 面试官偏好按行优先级递减，越靠前权重越高。",
+    "",
+    `岗位描述：\n${jobDescription}`,
+    "",
+    `面试官偏好优先级：\n${preferencePriority}`,
+    "",
+    `候选人简历列表：\n${resumeBlocks}`,
+  ].join("\n");
+}
+
+function parseAndValidateBatchAnalysis(
+  rawText: string,
+  fileNames: string[],
+): BatchAnalysis {
   const jsonText = rawText
     .trim()
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "");
-  const analysis = JSON.parse(jsonText) as Partial<CandidateAnalysis>;
+  const analysis = JSON.parse(jsonText) as Partial<BatchAnalysis>;
 
-  if (
-    typeof analysis.matchScore !== "number" ||
-    !Number.isFinite(analysis.matchScore) ||
-    typeof analysis.matchLevel !== "string" ||
-    !Array.isArray(analysis.strengths) ||
-    !Array.isArray(analysis.risks) ||
-    !["Yes", "Maybe", "No"].includes(String(analysis.recommendation)) ||
-    typeof analysis.recommendationReason !== "string"
-  ) {
-    throw new Error("Invalid DeepSeek analysis response.");
+  if (!Array.isArray(analysis.candidates)) {
+    throw new Error("Invalid DeepSeek batch analysis response.");
   }
 
-  const recommendation = normalizeRecommendation(analysis.recommendation);
+  const candidates = analysis.candidates.map((candidate, index) =>
+    normalizeCandidateAnalysis(candidate, fileNames[index], index),
+  );
 
   return {
-    matchScore: Math.max(0, Math.min(100, Math.round(analysis.matchScore))),
-    matchLevel: analysis.matchLevel,
-    strengths: analysis.strengths.map(String).slice(0, 6),
-    risks: analysis.risks.map(String).slice(0, 6),
+    candidates: candidates.sort((a, b) => b.matchScore - a.matchScore),
+  };
+}
+
+function normalizeCandidateAnalysis(
+  candidate: Partial<CandidateAnalysis>,
+  fallbackFileName: string,
+  index: number,
+): CandidateAnalysis {
+  if (
+    typeof candidate !== "object" ||
+    candidate === null ||
+    typeof candidate.matchScore !== "number" ||
+    !Number.isFinite(candidate.matchScore) ||
+    !Array.isArray(candidate.strengths) ||
+    !Array.isArray(candidate.risks) ||
+    !["Yes", "Maybe", "No"].includes(String(candidate.recommendation))
+  ) {
+    throw new Error("Invalid DeepSeek candidate analysis response.");
+  }
+
+  const recommendation = normalizeRecommendation(candidate.recommendation);
+
+  return {
+    candidateName:
+      typeof candidate.candidateName === "string" &&
+      candidate.candidateName.trim()
+        ? candidate.candidateName.trim()
+        : `候选人 ${index + 1}`,
+    fileName:
+      typeof candidate.fileName === "string" && candidate.fileName.trim()
+        ? candidate.fileName.trim()
+        : fallbackFileName,
+    matchScore: Math.max(0, Math.min(100, Math.round(candidate.matchScore))),
+    matchLevel:
+      typeof candidate.matchLevel === "string" && candidate.matchLevel.trim()
+        ? candidate.matchLevel.trim()
+        : "Medium Match",
+    strengths: candidate.strengths.map(String).slice(0, 4),
+    risks: candidate.risks.map(String).slice(0, 4),
     recommendation,
-    recommendationReason: analysis.recommendationReason,
+    recommendationReason:
+      typeof candidate.recommendationReason === "string" &&
+      candidate.recommendationReason.trim()
+        ? candidate.recommendationReason.trim()
+        : "建议在面试中进一步验证候选人与岗位要求的匹配度。",
   };
 }
 
@@ -180,30 +276,35 @@ function normalizeRecommendation(
 async function readAnalyzeRequest(request: NextRequest) {
   const contentType = request.headers.get("content-type") || "";
 
-  if (contentType.includes("multipart/form-data")) {
-    const formData = await request.formData();
-    const pastedResumeText = getFormString(formData, "resumeText");
-    const jobDescription = getFormString(formData, "jobDescription");
-    const interviewerPreferences = getFormString(
-      formData,
-      "interviewerPreferences",
-    );
-    const resumeFile = formData.get("resumeFile");
-    const fileResumeText =
-      resumeFile instanceof File ? await extractResumeText(resumeFile) : "";
-
-    return {
-      resumeText: pastedResumeText || fileResumeText,
-      jobDescription,
-      interviewerPreferences,
-    };
+  if (!contentType.includes("multipart/form-data")) {
+    throw new UserFacingError("请上传 PDF 或 DOCX 简历文件。");
   }
 
-  const body = (await request.json()) as AnalyzeRequest;
+  const formData = await request.formData();
+  const jobDescription = getFormString(formData, "jobDescription");
+  const interviewerPreferences = getFormString(
+    formData,
+    "interviewerPreferences",
+  );
+  const resumeFiles = formData
+    .getAll("resumeFiles")
+    .filter((file): file is File => file instanceof File);
+
+  if (resumeFiles.length > MAX_RESUME_COUNT) {
+    throw new UserFacingError(`单次最多支持 ${MAX_RESUME_COUNT} 份简历。`);
+  }
+
+  const resumes = await Promise.all(
+    resumeFiles.map(async (file) => ({
+      fileName: file.name,
+      text: await extractResumeText(file),
+    })),
+  );
+
   return {
-    resumeText: body.resumeText || "",
-    jobDescription: body.jobDescription || "",
-    interviewerPreferences: body.interviewerPreferences || "",
+    resumes,
+    jobDescription,
+    interviewerPreferences,
   };
 }
 
@@ -228,16 +329,24 @@ async function extractResumeText(file: File) {
     fileName.endsWith(".docx")
   ) {
     const parsedDocx = await mammoth.extractRawText({ buffer });
-    return parsedDocx.value.trim();
+    const text = parsedDocx.value.trim();
+
+    if (!text) {
+      throw new UserFacingError(
+        `${file.name} 未能提取到文本，请检查文件内容。`,
+      );
+    }
+
+    return text;
   }
 
   if (mimeType === "application/msword" || fileName.endsWith(".doc")) {
     throw new UserFacingError(
-      "暂不支持旧版 .doc 文件，请上传 DOCX 或粘贴简历文本。",
+      "暂不支持旧版 .doc 文件，请上传 DOCX 或 PDF 简历。",
     );
   }
 
-  throw new UserFacingError("仅支持 PDF、DOCX，或直接粘贴简历文本。");
+  throw new UserFacingError("仅支持 PDF 或 DOCX 简历。");
 }
 
 class UserFacingError extends Error {}
@@ -277,7 +386,7 @@ async function extractPdfText(buffer: Buffer) {
 
     if (!text) {
       throw new UserFacingError(
-        "未能从 PDF 中提取到文本，请尝试粘贴简历文本。",
+        "未能从 PDF 中提取到文本，请检查 PDF 是否为可复制文本。",
       );
     }
 
