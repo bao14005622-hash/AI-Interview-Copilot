@@ -25,6 +25,11 @@ type FailedResume = {
   error: string;
 };
 
+type ParsedResume = {
+  fileName: string;
+  text: string;
+};
+
 type BatchAnalysisResult = {
   candidates: CandidateResult[];
   failedResumes: FailedResume[];
@@ -46,6 +51,7 @@ export default function Home() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<BatchAnalysisResult | null>(null);
+  const [parsedFileNames, setParsedFileNames] = useState<Set<string>>(new Set());
 
   const sortedCandidates = useMemo(() => {
     return [...(result?.candidates || [])].sort(
@@ -96,6 +102,7 @@ export default function Home() {
     });
     setError("");
     setResult(null);
+    setParsedFileNames(new Set());
     event.target.value = "";
   }
 
@@ -105,6 +112,7 @@ export default function Home() {
     );
     setError("");
     setResult(null);
+    setParsedFileNames(new Set());
   }
 
   async function handleAnalyze() {
@@ -123,15 +131,43 @@ export default function Home() {
     setIsAnalyzing(true);
 
     try {
-      const formData = new FormData();
-      formData.append("jobDescription", jd.trim());
-      formData.append("interviewerPreferences", preferences.trim());
+      setResult({ candidates: [], failedResumes: [] });
+      setParsedFileNames(new Set());
 
-      candidateFiles.forEach((candidateFile) => {
-        formData.append("resumeFiles", candidateFile.file);
+      const parseResult = await parseCandidateFiles(candidateFiles, {
+        onFileParsed: (fileName) => {
+          setParsedFileNames((currentFileNames) => {
+            const nextFileNames = new Set(currentFileNames);
+            nextFileNames.add(fileName);
+            return nextFileNames;
+          });
+        },
+        onFileFailed: (failedResume) => {
+          setResult((currentResult) => ({
+            candidates: currentResult?.candidates || [],
+            failedResumes: [
+              ...(currentResult?.failedResumes || []),
+              failedResume,
+            ],
+          }));
+        },
       });
 
-      const response = await fetchAnalyzeWithRetry(formData);
+      setResult({
+        candidates: [],
+        failedResumes: parseResult.failedResumes,
+      });
+
+      if (!parseResult.parsedResumes.length) {
+        throw new Error("所有简历都解析失败，请检查文件格式或内容。");
+      }
+
+      const response = await fetchAnalyzeWithRetry({
+        resumes: parseResult.parsedResumes,
+        failedResumes: parseResult.failedResumes,
+        jobDescription: jd.trim(),
+        interviewerPreferences: preferences.trim(),
+      });
 
       const payload = await parseAnalyzeResponse(response);
 
@@ -281,7 +317,7 @@ export default function Home() {
                       failureReason={failedResumeMap.get(candidateFile.file.name)}
                       index={index}
                       isAnalyzed={analyzedFileNames.has(candidateFile.file.name)}
-                      isAnalyzing={isAnalyzing}
+                      isParsing={isAnalyzing && !parsedFileNames.has(candidateFile.file.name)}
                       key={candidateFile.id}
                       onRemove={removeCandidateFile}
                     />
@@ -450,17 +486,97 @@ async function parseAnalyzeResponse(response: Response) {
   }
 }
 
-async function fetchAnalyzeWithRetry(formData: FormData) {
+async function parseCandidateFiles(
+  candidateFiles: CandidateFile[],
+  callbacks: {
+    onFileParsed: (fileName: string) => void;
+    onFileFailed: (failedResume: FailedResume) => void;
+  },
+) {
+  const parsedResumes: ParsedResume[] = [];
+  const failedResumes: FailedResume[] = [];
+
+  for (const candidateFile of candidateFiles) {
+    const formData = new FormData();
+    formData.append("resumeFile", candidateFile.file);
+
+    try {
+      const response = await fetch("/api/parse-resume", {
+        method: "POST",
+        body: formData,
+        cache: "no-store",
+      });
+      const payload = await parseResumeResponse(response, candidateFile.file.name);
+
+      if (!response.ok) {
+        throw new Error(payload.error);
+      }
+
+      parsedResumes.push({
+        fileName: payload.fileName,
+        text: payload.text,
+      });
+      callbacks.onFileParsed(candidateFile.file.name);
+    } catch (error) {
+      const failedResume = {
+        fileName: candidateFile.file.name,
+        error:
+          error instanceof Error
+            ? error.message
+            : "简历解析失败，请检查文件是否损坏。",
+      };
+      failedResumes.push(failedResume);
+      callbacks.onFileFailed(failedResume);
+    }
+  }
+
+  return { parsedResumes, failedResumes };
+}
+
+async function parseResumeResponse(response: Response, fallbackFileName: string) {
+  try {
+    const parsed = await response.json();
+
+    return {
+      fileName:
+        typeof parsed?.fileName === "string" ? parsed.fileName : fallbackFileName,
+      text: typeof parsed?.text === "string" ? parsed.text : "",
+      error:
+        typeof parsed?.error === "string"
+          ? parsed.error
+          : "简历解析失败，请检查文件是否损坏。",
+    };
+  } catch {
+    return {
+      fileName: fallbackFileName,
+      text: "",
+      error: "简历解析失败，请检查文件是否损坏。",
+    };
+  }
+}
+
+async function fetchAnalyzeWithRetry(body: {
+  resumes: ParsedResume[];
+  failedResumes: FailedResume[];
+  jobDescription: string;
+  interviewerPreferences: string;
+}) {
   try {
     return await fetch("/api/analyze", {
       method: "POST",
-      body: formData,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
       cache: "no-store",
     });
   } catch {
     return fetch("/api/analyze", {
       method: "POST",
-      body: formData,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
       cache: "no-store",
     });
   }
@@ -574,14 +690,14 @@ function CandidateFileRow({
   failureReason,
   index,
   isAnalyzed,
-  isAnalyzing,
+  isParsing,
   onRemove,
 }: {
   candidateFile: CandidateFile;
   failureReason?: string;
   index: number;
   isAnalyzed: boolean;
-  isAnalyzing: boolean;
+  isParsing: boolean;
   onRemove: (id: string) => void;
 }) {
   const fileExtension =
@@ -589,7 +705,7 @@ function CandidateFileRow({
   const status = getCandidateFileStatus({
     failureReason,
     isAnalyzed,
-    isAnalyzing,
+    isParsing,
   });
 
   return (
@@ -634,11 +750,11 @@ function CandidateFileRow({
 function getCandidateFileStatus({
   failureReason,
   isAnalyzed,
-  isAnalyzing,
+  isParsing,
 }: {
   failureReason?: string;
   isAnalyzed: boolean;
-  isAnalyzing: boolean;
+  isParsing: boolean;
 }) {
   if (failureReason) {
     return {
@@ -654,7 +770,7 @@ function getCandidateFileStatus({
     };
   }
 
-  if (isAnalyzing) {
+  if (isParsing) {
     return {
       label: "解析中",
       className: "font-semibold text-amber-600",
