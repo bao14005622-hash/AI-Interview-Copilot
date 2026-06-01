@@ -114,10 +114,7 @@ export default function Home() {
         formData.append("resumeFiles", candidateFile.file);
       });
 
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetchAnalyzeWithRetry(formData);
 
       const payload = await parseAnalyzeResponse(response);
 
@@ -128,9 +125,7 @@ export default function Home() {
       setResult(payload.data);
     } catch (analysisError) {
       setError(
-        analysisError instanceof Error
-          ? analysisError.message
-          : "批量分析失败，请重试。",
+        getAnalyzeErrorMessage(analysisError),
       );
     } finally {
       setIsAnalyzing(false);
@@ -403,6 +398,30 @@ async function parseAnalyzeResponse(response: Response) {
       data: null,
     };
   }
+}
+
+async function fetchAnalyzeWithRetry(formData: FormData) {
+  try {
+    return await fetch("/api/analyze", {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+  } catch {
+    return fetch("/api/analyze", {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+  }
+}
+
+function getAnalyzeErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message !== "Failed to fetch") {
+    return error.message;
+  }
+
+  return "网络连接中断，请刷新页面后再试。";
 }
 
 function getFileKey(file: File) {
