@@ -20,8 +20,14 @@ type CandidateResult = {
   recommendationReason: string;
 };
 
+type FailedResume = {
+  fileName: string;
+  error: string;
+};
+
 type BatchAnalysisResult = {
   candidates: CandidateResult[];
+  failedResumes: FailedResume[];
 };
 
 const preferenceExample = [
@@ -61,6 +67,17 @@ export default function Home() {
     );
     return Math.round(total / sortedCandidates.length);
   }, [sortedCandidates]);
+  const failedResumeMap = useMemo(() => {
+    return new Map(
+      (result?.failedResumes || []).map((failedResume) => [
+        failedResume.fileName,
+        failedResume.error,
+      ]),
+    );
+  }, [result]);
+  const analyzedFileNames = useMemo(() => {
+    return new Set((result?.candidates || []).map((candidate) => candidate.fileName));
+  }, [result]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
@@ -119,10 +136,26 @@ export default function Home() {
       const payload = await parseAnalyzeResponse(response);
 
       if (!response.ok) {
+        if (payload.data?.failedResumes.length) {
+          setResult(payload.data);
+        }
         throw new Error(payload.error || "批量分析失败，请重试。");
       }
 
-      setResult(payload.data);
+      if (!payload.data) {
+        throw new Error("分析结果格式异常，请重试。");
+      }
+
+      setResult({
+        candidates: payload.data.candidates,
+        failedResumes: payload.data.failedResumes || [],
+      });
+
+      if (payload.data.failedResumes?.length) {
+        setError(
+          `${payload.data.failedResumes.length} 份简历解析失败，已在上传列表中标注。`,
+        );
+      }
     } catch (analysisError) {
       setError(
         getAnalyzeErrorMessage(analysisError),
@@ -245,7 +278,10 @@ export default function Home() {
                   {candidateFiles.map((candidateFile, index) => (
                     <CandidateFileRow
                       candidateFile={candidateFile}
+                      failureReason={failedResumeMap.get(candidateFile.file.name)}
                       index={index}
+                      isAnalyzed={analyzedFileNames.has(candidateFile.file.name)}
+                      isAnalyzing={isAnalyzing}
                       key={candidateFile.id}
                       onRemove={removeCandidateFile}
                     />
@@ -342,7 +378,7 @@ export default function Home() {
 
           {sortedCandidates.length ? (
             <div className="mt-6 flex flex-col gap-5">
-              <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <SummaryCard label="已分析候选人" value={String(sortedCandidates.length)} />
                 <SummaryCard
                   label="最高匹配分"
@@ -350,6 +386,10 @@ export default function Home() {
                 />
                 <SummaryCard label="推荐推进" value={String(recommendedCount)} />
                 <SummaryCard label="平均匹配分" value={`${averageScore}/100`} />
+                <SummaryCard
+                  label="解析失败"
+                  value={String(result?.failedResumes?.length || 0)}
+                />
               </div>
 
               <CandidateRankingTable candidates={sortedCandidates} />
@@ -382,13 +422,23 @@ async function parseAnalyzeResponse(response: Response) {
           typeof parsed?.error === "string"
             ? parsed.error
             : "批量分析失败，请重试。",
-        data: null,
+        data: {
+          candidates: Array.isArray(parsed?.candidates) ? parsed.candidates : [],
+          failedResumes: Array.isArray(parsed?.failedResumes)
+            ? parsed.failedResumes
+            : [],
+        } as BatchAnalysisResult,
       };
     }
 
     return {
       error: "",
-      data: parsed as BatchAnalysisResult,
+      data: {
+        candidates: Array.isArray(parsed?.candidates) ? parsed.candidates : [],
+        failedResumes: Array.isArray(parsed?.failedResumes)
+          ? parsed.failedResumes
+          : [],
+      } as BatchAnalysisResult,
     };
   } catch {
     return {
@@ -521,19 +571,40 @@ function FileInput({
 
 function CandidateFileRow({
   candidateFile,
+  failureReason,
   index,
+  isAnalyzed,
+  isAnalyzing,
   onRemove,
 }: {
   candidateFile: CandidateFile;
+  failureReason?: string;
   index: number;
+  isAnalyzed: boolean;
+  isAnalyzing: boolean;
   onRemove: (id: string) => void;
 }) {
   const fileExtension =
     candidateFile.file.name.split(".").pop()?.toUpperCase() || "FILE";
+  const status = getCandidateFileStatus({
+    failureReason,
+    isAnalyzed,
+    isAnalyzing,
+  });
 
   return (
-    <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[auto_1fr_auto] sm:items-center">
-      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-sm font-bold text-emerald-700">
+    <div
+      className={`grid gap-3 rounded-2xl border bg-white p-4 shadow-sm sm:grid-cols-[auto_1fr_auto] sm:items-center ${
+        failureReason ? "border-red-200 bg-red-50/40" : "border-slate-200"
+      }`}
+    >
+      <div
+        className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold ${
+          failureReason
+            ? "bg-red-100 text-red-700"
+            : "bg-emerald-50 text-emerald-700"
+        }`}
+      >
         {index + 1}
       </div>
       <div className="min-w-0">
@@ -543,8 +614,11 @@ function CandidateFileRow({
         <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
           <span>{fileExtension}</span>
           <span>{formatFileSize(candidateFile.file.size)}</span>
-          <span className="text-emerald-700">待分析</span>
+          <span className={status.className}>{status.label}</span>
         </div>
+        {failureReason ? (
+          <p className="mt-2 text-xs leading-5 text-red-600">{failureReason}</p>
+        ) : null}
       </div>
       <button
         type="button"
@@ -555,6 +629,42 @@ function CandidateFileRow({
       </button>
     </div>
   );
+}
+
+function getCandidateFileStatus({
+  failureReason,
+  isAnalyzed,
+  isAnalyzing,
+}: {
+  failureReason?: string;
+  isAnalyzed: boolean;
+  isAnalyzing: boolean;
+}) {
+  if (failureReason) {
+    return {
+      label: "解析失败",
+      className: "font-semibold text-red-600",
+    };
+  }
+
+  if (isAnalyzed) {
+    return {
+      label: "已分析",
+      className: "font-semibold text-emerald-700",
+    };
+  }
+
+  if (isAnalyzing) {
+    return {
+      label: "解析中",
+      className: "font-semibold text-amber-600",
+    };
+  }
+
+  return {
+    label: "待分析",
+    className: "text-emerald-700",
+  };
 }
 
 function SummaryCard({ label, value }: { label: string; value: string }) {

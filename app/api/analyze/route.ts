@@ -6,6 +6,11 @@ type CandidateResume = {
   text: string;
 };
 
+type FailedResume = {
+  fileName: string;
+  error: string;
+};
+
 type CandidateAnalysis = {
   candidateName: string;
   fileName: string;
@@ -19,6 +24,7 @@ type CandidateAnalysis = {
 
 type BatchAnalysis = {
   candidates: CandidateAnalysis[];
+  failedResumes: FailedResume[];
 };
 
 export const runtime = "nodejs";
@@ -34,7 +40,12 @@ export async function POST(request: NextRequest) {
 
     if (!requestData.resumes.length) {
       return NextResponse.json(
-        { error: "请先批量上传候选人简历。" },
+        {
+          error: requestData.failedResumes.length
+            ? "所有简历都解析失败，请检查文件格式或内容。"
+            : "请先批量上传候选人简历。",
+          failedResumes: requestData.failedResumes,
+        },
         { status: 400 },
       );
     }
@@ -109,7 +120,10 @@ export async function POST(request: NextRequest) {
       requestData.resumes.map((resume) => resume.fileName),
     );
 
-    return NextResponse.json(analysis);
+    return NextResponse.json({
+      ...analysis,
+      failedResumes: requestData.failedResumes,
+    });
   } catch (error) {
     console.error("Batch candidate analysis failed:", error);
 
@@ -197,7 +211,7 @@ function buildBatchAnalysisPrompt({
 function parseAndValidateBatchAnalysis(
   rawText: string,
   fileNames: string[],
-): BatchAnalysis {
+): Omit<BatchAnalysis, "failedResumes"> {
   const jsonText = rawText
     .trim()
     .replace(/^```json\s*/i, "")
@@ -294,15 +308,37 @@ async function readAnalyzeRequest(request: NextRequest) {
     throw new UserFacingError(`单次最多支持 ${MAX_RESUME_COUNT} 份简历。`);
   }
 
-  const resumes = await Promise.all(
-    resumeFiles.map(async (file) => ({
-      fileName: file.name,
-      text: await extractResumeText(file),
-    })),
+  const parseResults = await Promise.all(
+    resumeFiles.map(async (file) => {
+      try {
+        return {
+          status: "success" as const,
+          resume: {
+            fileName: file.name,
+            text: await extractResumeText(file),
+          },
+        };
+      } catch (error) {
+        return {
+          status: "failed" as const,
+          failedResume: {
+            fileName: file.name,
+            error: getParseErrorMessage(error),
+          },
+        };
+      }
+    }),
   );
+  const resumes = parseResults
+    .filter((result) => result.status === "success")
+    .map((result) => result.resume);
+  const failedResumes = parseResults
+    .filter((result) => result.status === "failed")
+    .map((result) => result.failedResume);
 
   return {
     resumes,
+    failedResumes,
     jobDescription,
     interviewerPreferences,
   };
@@ -311,6 +347,12 @@ async function readAnalyzeRequest(request: NextRequest) {
 function getFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
+}
+
+function getParseErrorMessage(error: unknown) {
+  if (error instanceof UserFacingError) return error.message;
+  if (error instanceof Error && error.message) return error.message;
+  return "简历解析失败，请检查文件是否损坏。";
 }
 
 async function extractResumeText(file: File) {
