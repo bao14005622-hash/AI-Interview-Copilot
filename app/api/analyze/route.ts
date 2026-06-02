@@ -4,6 +4,12 @@ import {
   getParseErrorMessage,
   UserFacingError,
 } from "@/lib/resume-parser";
+import {
+  normalizeScoreBreakdown,
+  SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE,
+  SCORE_DIMENSIONS,
+  type ScoreBreakdown,
+} from "@/lib/candidate-scoring";
 
 type CandidateResume = {
   fileName: string;
@@ -20,10 +26,13 @@ type CandidateAnalysis = {
   fileName: string;
   matchScore: number;
   matchLevel: string;
+  scoreBreakdown: ScoreBreakdown;
   strengths: string[];
   risks: string[];
   recommendation: "Yes" | "Maybe" | "No";
   recommendationReason: string;
+  capTriggered: boolean;
+  capReason: string;
 };
 
 type BatchAnalysis = {
@@ -181,7 +190,18 @@ function buildBatchAnalysisPrompt({
 
   return [
     "请基于同一个岗位 JD 和同一组面试官偏好，对多位候选人进行横向比较、评分和排序。",
+    "评分定位：这是一个“面试推荐型”评分，不是基础学历筛选。用户导入简历前已经筛过学历和专业，所以不要让学历、学校、专业主导总分。",
     "你必须返回 JSON 对象，不要使用 Markdown，不要包裹代码块。",
+    "",
+    "总分规则：",
+    "- 总分为 100 分，必须由五个维度综合得出。",
+    ...SCORE_DIMENSIONS.map(
+      (dimension) => `- ${dimension.label}：${dimension.maxScore} 分。`,
+    ),
+    `- 如果候选人没有相关实习经历，也没有相关项目经历，matchScore 最高只能是 ${SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE} 分。`,
+    "- 相关经历包括产品经理实习、运营、数据分析、商业分析、用户研究、增长、战略，或能体现 PRD、用户调研、竞品分析、需求拆解、数据分析、项目推进、业务复盘等能力的项目。",
+    "- 面试官偏好只占 15 分，按行优先级递减；它会影响排序，但不能覆盖 JD 相关度和项目证据。",
+    "- 不要编造简历中没有的经历、数据或成果。缺少证据时应写入 risks。",
     "",
     "JSON 格式必须严格为：",
     "{",
@@ -191,10 +211,19 @@ function buildBatchAnalysisPrompt({
     '      "fileName": string,',
     '      "matchScore": number,',
     '      "matchLevel": "Strong Match" | "Medium Match" | "Weak Match",',
+    '      "scoreBreakdown": {',
+    '        "jobRelevantExperience": number,',
+    '        "projectEvidenceStrength": number,',
+    '        "transferableCapability": number,',
+    '        "resumeClarity": number,',
+    '        "interviewerPreferenceMatch": number',
+    "      },",
     '      "strengths": string[],',
     '      "risks": string[],',
     '      "recommendation": "Yes" | "Maybe" | "No",',
-    '      "recommendationReason": string',
+    '      "recommendationReason": string,',
+    '      "capTriggered": boolean,',
+    '      "capReason": string',
     "    }",
     "  ]",
     "}",
@@ -205,6 +234,10 @@ function buildBatchAnalysisPrompt({
     "- candidateName 尽量从简历中提取真实姓名，无法确认时使用“候选人 X”。",
     "- fileName 必须使用输入中的原始文件名。",
     "- matchScore 必须是 0 到 100 的数字。",
+    "- scoreBreakdown 中每一项不能超过对应维度满分。",
+    `- capTriggered 为 true 时，matchScore 必须小于等于 ${SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE}，capReason 必须说明缺少相关实习或项目经历。`,
+    "- capTriggered 为 false 时，capReason 返回空字符串。",
+    "- 85-100 分 recommendation 为 Yes；75-84 分通常为 Maybe；60-74 分为 Maybe 或 No；0-59 分为 No。",
     "- strengths 输出 2 到 4 个简洁中文短语。",
     "- risks 输出 2 到 4 个简洁中文短语。",
     "- recommendation 只能是 Yes、Maybe 或 No。",
@@ -261,6 +294,12 @@ function normalizeCandidateAnalysis(
   }
 
   const recommendation = normalizeRecommendation(candidate.recommendation);
+  const scoreBreakdown = normalizeScoreBreakdown(candidate.scoreBreakdown);
+  const capTriggered = candidate.capTriggered === true;
+  const rawMatchScore = Math.max(
+    0,
+    Math.min(100, Math.round(candidate.matchScore)),
+  );
 
   return {
     candidateName:
@@ -272,11 +311,14 @@ function normalizeCandidateAnalysis(
       typeof candidate.fileName === "string" && candidate.fileName.trim()
         ? candidate.fileName.trim()
         : fallbackFileName,
-    matchScore: Math.max(0, Math.min(100, Math.round(candidate.matchScore))),
+    matchScore: capTriggered
+      ? Math.min(rawMatchScore, SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE)
+      : rawMatchScore,
     matchLevel:
       typeof candidate.matchLevel === "string" && candidate.matchLevel.trim()
         ? candidate.matchLevel.trim()
         : "Medium Match",
+    scoreBreakdown,
     strengths: candidate.strengths.map(String).slice(0, 4),
     risks: candidate.risks.map(String).slice(0, 4),
     recommendation,
@@ -285,6 +327,15 @@ function normalizeCandidateAnalysis(
       candidate.recommendationReason.trim()
         ? candidate.recommendationReason.trim()
         : "建议在面试中进一步验证候选人与岗位要求的匹配度。",
+    capTriggered,
+    capReason:
+      capTriggered &&
+      typeof candidate.capReason === "string" &&
+      candidate.capReason.trim()
+        ? candidate.capReason.trim()
+        : capTriggered
+          ? "由于简历中缺少相关实习或相关项目经历，候选人总分最高限制为 75 分。"
+          : "",
   };
 }
 
