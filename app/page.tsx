@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, Fragment, useMemo, useState } from "react";
 import {
   SCORE_DIMENSIONS,
   type ScoreBreakdown,
@@ -443,8 +443,6 @@ export default function Home() {
               </div>
 
               <CandidateRankingTable candidates={sortedCandidates} />
-              <AgentFlowSection candidates={sortedCandidates} />
-              <EvidenceChainSection candidates={sortedCandidates} />
             </div>
           ) : (
             <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-14 text-center">
@@ -826,10 +824,23 @@ function CandidateRankingTable({
 }: {
   candidates: CandidateResult[];
 }) {
+  const [expandedCandidateKey, setExpandedCandidateKey] = useState("");
+
+  function getCandidateKey(candidate: CandidateResult, index: number) {
+    return `${candidate.fileName}-${index}`;
+  }
+
+  function toggleCandidate(candidate: CandidateResult, index: number) {
+    const candidateKey = getCandidateKey(candidate, index);
+    setExpandedCandidateKey((currentKey) =>
+      currentKey === candidateKey ? "" : candidateKey,
+    );
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
       <div className="hidden overflow-x-auto lg:block">
-        <table className="w-full min-w-[1120px] border-collapse text-left">
+        <table className="w-full min-w-[1160px] border-collapse text-left">
           <thead className="bg-slate-950 text-white">
             <tr>
               <th className="px-5 py-4 text-sm font-semibold">排名</th>
@@ -838,227 +849,357 @@ function CandidateRankingTable({
               <th className="px-5 py-4 text-sm font-semibold">推荐程度</th>
               <th className="px-5 py-4 text-sm font-semibold">核心优势</th>
               <th className="px-5 py-4 text-sm font-semibold">主要风险</th>
+              <th className="px-5 py-4 text-sm font-semibold">详情</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white">
-            {candidates.map((candidate, index) => (
-              <tr key={`${candidate.fileName}-${index}`}>
-                <td className="px-5 py-5 align-top">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-sm font-bold text-emerald-700">
-                    {index + 1}
-                  </span>
-                </td>
-                <td className="px-5 py-5 align-top">
-                  <p className="font-semibold text-slate-950">
-                    {candidate.candidateName}
-                  </p>
-                  <p className="mt-1 max-w-56 truncate text-xs text-slate-500">
-                    {candidate.fileName}
-                  </p>
-                </td>
-                <td className="px-5 py-5 align-top">
-                  <p className="text-xl font-semibold text-slate-950">
-                    {candidate.matchScore}/100
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">
-                    {candidate.matchLevel}
-                  </p>
-                  <ScoreBreakdownList scoreBreakdown={candidate.scoreBreakdown} />
-                </td>
-                <td className="px-5 py-5 align-top">
-                  <span
-                    className={`rounded-full px-3 py-1.5 text-sm font-semibold ${recommendationClass(candidate.recommendation)}`}
-                  >
-                    {recommendationLabel(candidate.recommendation)}
-                  </span>
-                </td>
-                <td className="px-5 py-5 align-top">
-                  <TagList items={candidate.strengths} tone="positive" />
-                </td>
-                <td className="px-5 py-5 align-top">
-                  <TagList items={candidate.risks} tone="risk" />
-                </td>
-              </tr>
-            ))}
+            {candidates.map((candidate, index) => {
+              const candidateKey = getCandidateKey(candidate, index);
+              const isExpanded = expandedCandidateKey === candidateKey;
+
+              return (
+                <Fragment key={candidateKey}>
+                  <tr>
+                    <td className="px-5 py-5 align-top">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-sm font-bold text-emerald-700">
+                        {index + 1}
+                      </span>
+                    </td>
+                    <td className="px-5 py-5 align-top">
+                      <p className="font-semibold text-slate-950">
+                        {candidate.candidateName}
+                      </p>
+                      <p className="mt-1 max-w-56 truncate text-xs text-slate-500">
+                        {candidate.fileName}
+                      </p>
+                    </td>
+                    <td className="px-5 py-5 align-top">
+                      <p className="text-xl font-semibold text-slate-950">
+                        {candidate.matchScore}/100
+                      </p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">
+                        {candidate.matchLevel}
+                      </p>
+                    </td>
+                    <td className="px-5 py-5 align-top">
+                      <span
+                        className={`rounded-full px-3 py-1.5 text-sm font-semibold ${recommendationClass(candidate.recommendation)}`}
+                      >
+                        {recommendationLabel(candidate.recommendation)}
+                      </span>
+                    </td>
+                    <td className="px-5 py-5 align-top">
+                      <TagList items={candidate.strengths} tone="positive" />
+                    </td>
+                    <td className="px-5 py-5 align-top">
+                      <TagList items={candidate.risks} tone="risk" />
+                    </td>
+                    <td className="px-5 py-5 align-top">
+                      <button
+                        type="button"
+                        onClick={() => toggleCandidate(candidate, index)}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        {isExpanded ? "收起详情" : "查看详情"}
+                      </button>
+                    </td>
+                  </tr>
+
+                  {isExpanded ? (
+                    <tr>
+                      <td className="bg-slate-50 px-5 py-5" colSpan={7}>
+                        <CandidateDetail candidate={candidate} />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       <div className="flex flex-col divide-y divide-slate-200 bg-white lg:hidden">
-        {candidates.map((candidate, index) => (
-          <article className="p-4" key={`${candidate.fileName}-${index}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-emerald-700">
-                  第 {index + 1} 名
-                </p>
-                <h3 className="mt-1 text-lg font-semibold text-slate-950">
-                  {candidate.candidateName}
-                </h3>
-                <p className="mt-1 break-all text-xs text-slate-500">
-                  {candidate.fileName}
-                </p>
+        {candidates.map((candidate, index) => {
+          const candidateKey = getCandidateKey(candidate, index);
+          const isExpanded = expandedCandidateKey === candidateKey;
+
+          return (
+            <article className="p-4" key={candidateKey}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-emerald-700">
+                    第 {index + 1} 名
+                  </p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-950">
+                    {candidate.candidateName}
+                  </h3>
+                  <p className="mt-1 break-all text-xs text-slate-500">
+                    {candidate.fileName}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-semibold text-slate-950">
+                    {candidate.matchScore}
+                  </p>
+                  <p className="text-xs text-slate-500">/100</p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-semibold text-slate-950">
-                  {candidate.matchScore}
-                </p>
-                <p className="text-xs text-slate-500">/100</p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold ${recommendationClass(candidate.recommendation)}`}
+                >
+                  {recommendationLabel(candidate.recommendation)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleCandidate(candidate, index)}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+                >
+                  {isExpanded ? "收起详情" : "查看详情"}
+                </button>
               </div>
-            </div>
-            <div className="mt-4">
-              <span
-                className={`rounded-full px-3 py-1.5 text-sm font-semibold ${recommendationClass(candidate.recommendation)}`}
-              >
-                {recommendationLabel(candidate.recommendation)}
-              </span>
-            </div>
-            <div className="mt-4">
-              <p className="mb-2 text-sm font-semibold text-slate-800">
-                评分拆解
-              </p>
-              <ScoreBreakdownList scoreBreakdown={candidate.scoreBreakdown} />
-            </div>
-            <div className="mt-4">
-              <p className="mb-2 text-sm font-semibold text-slate-800">核心优势</p>
-              <TagList items={candidate.strengths} tone="positive" />
-            </div>
-            <div className="mt-4">
-              <p className="mb-2 text-sm font-semibold text-slate-800">主要风险</p>
-              <TagList items={candidate.risks} tone="risk" />
-            </div>
-            <p className="mt-4 text-sm leading-6 text-slate-600">
-              {candidate.recommendationReason}
-            </p>
-          </article>
-        ))}
+
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-semibold text-slate-800">核心优势</p>
+                <TagList items={candidate.strengths} tone="positive" />
+              </div>
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-semibold text-slate-800">主要风险</p>
+                <TagList items={candidate.risks} tone="risk" />
+              </div>
+
+              {isExpanded ? (
+                <div className="mt-4">
+                  <CandidateDetail candidate={candidate} />
+                </div>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function AgentFlowSection({
-  candidates,
-}: {
-  candidates: CandidateResult[];
-}) {
+function CandidateDetail({ candidate }: { candidate: CandidateResult }) {
+  const [isAgentFlowOpen, setIsAgentFlowOpen] = useState(false);
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white">
-      <div>
-        <p className="text-sm font-semibold text-emerald-300">AI分析流程</p>
-        <h3 className="mt-1 text-xl font-semibold">
-          单次 LLM 调用模拟 Multi-Agent Flow
-        </h3>
-        <p className="mt-2 text-sm leading-6 text-slate-300">
-          每位候选人都会展示 JD、简历解析、证据检索、评分、风险和排序 6 个步骤，帮助你解释系统是如何得出结论的。
-        </p>
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-emerald-700">候选人详情</p>
+          <h4 className="mt-1 text-lg font-semibold text-slate-950">
+            五维评分与证据解释
+          </h4>
+          <p className="mt-1 text-sm leading-6 text-slate-500">
+            展示影响评分的命中证据、缺失证据和简短评分理由。
+          </p>
+        </div>
+        <div className="rounded-xl bg-slate-950 px-4 py-3 text-white">
+          <p className="text-2xl font-semibold">{candidate.matchScore}</p>
+          <p className="text-xs text-slate-300">综合分 /100</p>
+        </div>
       </div>
 
-      <div className="mt-5 grid gap-4">
-        {candidates.map((candidate, index) => (
-          <CandidateAgentFlow
-            candidate={candidate}
-            index={index}
-            key={`${candidate.fileName}-agent-flow-${index}`}
-          />
-        ))}
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {SCORE_DIMENSIONS.map((dimension) => {
+          const dimensionScore = candidate.dimensionScores?.[dimension.key];
+
+          return (
+            <DimensionDetailCard
+              candidate={candidate}
+              dimension={dimension}
+              dimensionScore={dimensionScore}
+              key={dimension.key}
+            />
+          );
+        })}
+      </div>
+
+      <div className="mt-5 border-t border-slate-200 pt-4">
+        <button
+          type="button"
+          onClick={() => setIsAgentFlowOpen((isOpen) => !isOpen)}
+          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
+        >
+          {isAgentFlowOpen ? "收起 AI 分析流程" : "查看 AI 分析流程"}
+        </button>
+
+        {isAgentFlowOpen ? (
+          <AgentFlowTimeline steps={candidate.agentFlow || []} />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function CandidateAgentFlow({
+function DimensionDetailCard({
   candidate,
-  index,
+  dimension,
+  dimensionScore,
 }: {
   candidate: CandidateResult;
-  index: number;
+  dimension: (typeof SCORE_DIMENSIONS)[number];
+  dimensionScore?: DimensionEvidenceMap[keyof DimensionEvidenceMap];
 }) {
-  const steps = candidate.agentFlow || [];
+  const hitEvidence = getHitEvidence(candidate, dimensionScore?.evidenceIds || []);
 
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold text-emerald-300">
-            第 {index + 1} 名
-          </p>
-          <h4 className="mt-1 text-lg font-semibold text-white">
-            {candidate.candidateName}
-          </h4>
-          <p className="mt-1 break-all text-xs text-slate-400">
-            {candidate.fileName}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white px-3 py-2 text-right text-slate-950">
-          <p className="text-lg font-semibold">{candidate.matchScore}/100</p>
-          <p className="text-xs text-slate-500">{candidate.matchLevel}</p>
-        </div>
-      </div>
-
-      {steps.length ? (
-        <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
-          {steps.map((step, stepIndex) => (
-            <AgentFlowStepCard
-              step={step}
-              stepIndex={stepIndex}
-              key={`${candidate.fileName}-${step.agentName}-${stepIndex}`}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="mt-4 rounded-2xl border border-amber-200/40 bg-amber-50/10 px-4 py-3 text-sm text-amber-100">
-          暂无流程数据，建议重新分析该候选人。
-        </div>
-      )}
-    </article>
-  );
-}
-
-function AgentFlowStepCard({
-  step,
-  stepIndex,
-}: {
-  step: AgentFlowStep;
-  stepIndex: number;
-}) {
-  return (
-    <div className="min-w-[230px] rounded-2xl border border-white/10 bg-white p-4 text-slate-950 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-50 text-xs font-bold text-emerald-700">
-            {stepIndex + 1}
-          </span>
-          <h5 className="text-sm font-semibold">{step.agentName}</h5>
+        <div>
+          <p className="text-sm font-semibold text-slate-950">
+            {dimension.label}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            命中证据 {hitEvidence.length} 条
+          </p>
         </div>
-        <span
-          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${agentStatusClass(step.status)}`}
-        >
-          {agentStatusLabel(step.status)}
+        <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
+          {dimensionScore?.score ?? 0}/{dimension.maxScore}
         </span>
       </div>
 
-      <div className="mt-4 space-y-3">
-        <div>
-          <p className="text-xs font-semibold text-slate-500">输入摘要</p>
-          <p className="mt-1 text-sm leading-5 text-slate-700">
-            {step.inputSummary}
+      <div className="mt-3">
+        <p className="text-xs font-semibold text-slate-700">命中证据</p>
+        {hitEvidence.length ? (
+          <div className="mt-2 grid gap-2">
+            {hitEvidence.map((evidence) => (
+              <div
+                className="rounded-xl border border-emerald-100 bg-white px-3 py-2"
+                key={evidence.id}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                    {sectionTypeLabel(evidence.sectionType)}
+                  </span>
+                  <span className="text-sm font-semibold text-slate-900">
+                    {evidence.title}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  关键词：{getEvidenceKeywords(evidence).join("、") || "暂无明确关键词"}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 rounded-xl border border-amber-100 bg-white px-3 py-2 text-sm text-amber-700">
+            该维度暂无可引用证据。
           </p>
-        </div>
-        <div>
-          <p className="text-xs font-semibold text-slate-500">输出摘要</p>
-          <p className="mt-1 text-sm leading-5 text-slate-700">
-            {step.outputSummary}
-          </p>
-        </div>
+        )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold text-slate-500">
-        <span>置信度 {formatConfidence(step.confidence)}</span>
-        <span>证据 {step.evidenceCount} 条</span>
+      <div className="mt-3">
+        <p className="text-xs font-semibold text-slate-700">缺失证据</p>
+        <TagList
+          items={
+            dimensionScore?.missingEvidence?.length
+              ? dimensionScore.missingEvidence
+              : ["暂无明显缺失"]
+          }
+          tone="risk"
+        />
+      </div>
+
+      {dimensionScore?.missingKeywords?.length ? (
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          缺失关键词：{dimensionScore.missingKeywords.join("、")}
+        </p>
+      ) : null}
+
+      <p className="mt-3 text-sm leading-6 text-slate-600">
+        {dimensionScore?.reasoning || "该维度需要进一步验证。"}
+      </p>
+    </div>
+  );
+}
+
+function AgentFlowTimeline({ steps }: { steps: AgentFlowStep[] }) {
+  if (!steps.length) {
+    return (
+      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+        暂无流程数据，建议重新分析该候选人。
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="space-y-3">
+        {steps.map((step, stepIndex) => (
+          <div className="relative flex gap-3" key={`${step.agentName}-${stepIndex}`}>
+            <div className="flex flex-col items-center">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">
+                {stepIndex + 1}
+              </span>
+              {stepIndex < steps.length - 1 ? (
+                <span className="mt-2 h-full min-h-8 w-px bg-slate-200" />
+              ) : null}
+            </div>
+            <div className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {step.agentName}
+                  </p>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${agentStatusClass(step.status)}`}
+                  >
+                    {agentStatusLabel(step.status)}
+                  </span>
+                </div>
+                <div className="flex gap-3 text-xs font-semibold text-slate-500">
+                  <span>置信度 {formatConfidence(step.confidence)}</span>
+                  <span>证据 {step.evidenceCount} 条</span>
+                </div>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {step.outputSummary}
+              </p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
+}
+
+function getHitEvidence(candidate: CandidateResult, evidenceIds: string[]) {
+  const evidenceById = new Map(
+    (candidate.evidenceChunks || []).map((chunk) => [chunk.id, chunk]),
+  );
+
+  return evidenceIds
+    .map((evidenceId) => evidenceById.get(evidenceId))
+    .filter((evidence): evidence is EvidenceChunk => Boolean(evidence))
+    .slice(0, 3);
+}
+
+function getEvidenceKeywords(evidence: EvidenceChunk) {
+  return Array.from(
+    new Set([
+      ...evidence.jdMatchedKeywords,
+      ...evidence.preferenceMatchedKeywords,
+    ]),
+  ).slice(0, 5);
+}
+
+function sectionTypeLabel(sectionType: EvidenceChunk["sectionType"]) {
+  const labels: Record<EvidenceChunk["sectionType"], string> = {
+    education: "教育",
+    internship: "实习",
+    project: "项目",
+    skill: "技能",
+    achievement: "成果",
+    leadership: "组织",
+    other: "其他",
+  };
+
+  return labels[sectionType] || "其他";
 }
 
 function agentStatusLabel(status: AgentFlowStep["status"]) {
@@ -1077,151 +1218,6 @@ function agentStatusClass(status: AgentFlowStep["status"]) {
 
 function formatConfidence(confidence: number) {
   return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`;
-}
-
-function EvidenceChainSection({
-  candidates,
-}: {
-  candidates: CandidateResult[];
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div>
-        <p className="text-sm font-semibold text-emerald-700">评分证据链</p>
-        <h3 className="mt-1 text-xl font-semibold text-slate-950">
-          缺失证据与评分理由
-        </h3>
-        <p className="mt-2 text-sm leading-6 text-slate-500">
-          页面只保留影响判断的缺失项和简短理由，避免展示大段简历原文。
-        </p>
-      </div>
-
-      <div className="mt-5 grid gap-4">
-        {candidates.map((candidate, index) => (
-          <CandidateEvidenceCard
-            candidate={candidate}
-            index={index}
-            key={`${candidate.fileName}-evidence-${index}`}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function CandidateEvidenceCard({
-  candidate,
-  index,
-}: {
-  candidate: CandidateResult;
-  index: number;
-}) {
-  return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold text-emerald-700">
-            第 {index + 1} 名
-          </p>
-          <h4 className="mt-1 text-lg font-semibold text-slate-950">
-            {candidate.candidateName}
-          </h4>
-          <p className="mt-1 break-all text-xs text-slate-500">
-            {candidate.fileName}
-          </p>
-        </div>
-        <div className="rounded-xl bg-slate-950 px-4 py-3 text-white">
-          <p className="text-2xl font-semibold">{candidate.matchScore}</p>
-          <p className="text-xs text-slate-300">综合分 /100</p>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {SCORE_DIMENSIONS.map((dimension) => {
-          const dimensionScore = candidate.dimensionScores?.[dimension.key];
-
-          return (
-            <div
-              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-              key={dimension.key}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-slate-950">
-                    {dimension.label}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    仅展示缺失项和评分理由
-                  </p>
-                </div>
-                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
-                  {dimensionScore?.score ?? 0}/{dimension.maxScore}
-                </span>
-              </div>
-
-              <div className="mt-3">
-                <p className="text-xs font-semibold text-slate-700">
-                  缺失证据
-                </p>
-                <TagList
-                  items={
-                    dimensionScore?.missingEvidence?.length
-                      ? dimensionScore.missingEvidence
-                      : ["暂无明显缺失"]
-                  }
-                  tone="risk"
-                />
-              </div>
-
-              {dimensionScore?.missingKeywords?.length ? (
-                <p className="mt-3 text-xs leading-5 text-slate-500">
-                  缺失关键词：{dimensionScore.missingKeywords.join("、")}
-                </p>
-              ) : null}
-
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                {dimensionScore?.reasoning || "该维度需要进一步验证。"}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    </article>
-  );
-}
-
-function ScoreBreakdownList({
-  scoreBreakdown,
-}: {
-  scoreBreakdown: ScoreBreakdown;
-}) {
-  return (
-    <div className="mt-3 grid max-w-md gap-2">
-      {SCORE_DIMENSIONS.map((dimension) => {
-        const score = scoreBreakdown?.[dimension.key] ?? 0;
-        const percentage = Math.round((score / dimension.maxScore) * 100);
-
-        return (
-          <div key={dimension.key}>
-            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-              <span className="font-medium text-slate-500">
-                {dimension.label}
-              </span>
-              <span className="font-semibold text-slate-700">
-                {score}/{dimension.maxScore}
-              </span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-emerald-500"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 function TagList({
