@@ -521,6 +521,7 @@ function formatEvidenceChunksForPrompt(chunks: EvidenceChunk[]) {
       (chunk) =>
         [
           `id: ${chunk.id}`,
+          `title: ${chunk.title}`,
           `sectionType: ${chunk.sectionType}`,
           `relevanceScore: ${chunk.relevanceScore}`,
           `jdMatchedKeywords: ${chunk.jdMatchedKeywords.join(", ") || "无"}`,
@@ -630,6 +631,6 @@ function normalizeReferencedEvidenceChunks(
   );
 
   return Array.from(referencedIds)
-    .map((id) => aiChunkById.get(id) || fallbackById.get(id))
+    .map((id) => fallbackById.get(id) || aiChunkById.get(id))
     .filter((chunk): chunk is EvidenceChunk => Boolean(chunk));
 }

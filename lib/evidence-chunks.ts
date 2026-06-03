@@ -15,6 +15,7 @@ export type SectionType =
 export type EvidenceChunk = {
   id: string;
   fileName: string;
+  title: string;
   text: string;
   sectionType: SectionType;
   jdMatchedKeywords: string[];
@@ -37,8 +38,52 @@ export type DimensionEvidenceKey = ScoreBreakdownKey;
 export type DimensionEvidenceMap = Record<DimensionEvidenceKey, DimensionEvidence>;
 
 const MAX_CHUNK_LENGTH = 260;
-const MIN_CHUNK_LENGTH = 18;
 const MAX_SELECTED_EVIDENCE_CHUNKS = 10;
+const GENERIC_TITLE_PATTERNS = [
+  "个人简历",
+  "简历",
+  "项目经历",
+  "项目经验",
+  "实习经历",
+  "工作经历",
+  "教育经历",
+  "教育背景",
+  "技能",
+  "专业技能",
+  "获奖经历",
+  "荣誉奖项",
+  "校园经历",
+];
+
+const SECTION_HEADERS: Array<{
+  sectionType: SectionType;
+  patterns: string[];
+}> = [
+  {
+    sectionType: "education",
+    patterns: ["教育经历", "教育背景", "学历背景", "学历", "教育"],
+  },
+  {
+    sectionType: "internship",
+    patterns: ["实习经历", "工作经历", "职业经历", "任职经历", "实践经历"],
+  },
+  {
+    sectionType: "project",
+    patterns: ["项目经历", "项目经验", "项目", "作品集"],
+  },
+  {
+    sectionType: "skill",
+    patterns: ["专业技能", "技能", "工具", "语言能力"],
+  },
+  {
+    sectionType: "achievement",
+    patterns: ["获奖经历", "荣誉奖项", "证书", "奖项", "荣誉"],
+  },
+  {
+    sectionType: "leadership",
+    patterns: ["校园经历", "社团经历", "学生工作", "组织经历", "领导力"],
+  },
+];
 
 const SECTION_KEYWORDS: Record<SectionType, string[]> = {
   education: [
@@ -157,11 +202,12 @@ const DIMENSION_PRIORITY: DimensionEvidenceKey[] = [
 ];
 
 export function createEvidenceChunks(fileName: string, resumeText: string) {
-  return splitResumeText(resumeText).map((text, index) => ({
+  return splitResumeText(resumeText).map((chunk, index) => ({
     id: `${slugFileName(fileName)}-chunk-${index + 1}`,
     fileName,
-    text,
-    sectionType: detectSectionType(text),
+    title: chunk.title,
+    text: chunk.text,
+    sectionType: chunk.sectionType,
     jdMatchedKeywords: [],
     preferenceMatchedKeywords: [],
     relevanceScore: 0,
@@ -256,24 +302,169 @@ function splitResumeText(resumeText: string) {
   const lines = resumeText
     .split(/\n+/)
     .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter((line) => line.length >= MIN_CHUNK_LENGTH);
+    .filter(Boolean);
 
-  const chunks: string[] = [];
-  let current = "";
+  const chunks: Array<{
+    text: string;
+    sectionType: SectionType;
+    title: string;
+  }> = [];
+  let currentSection: SectionType = "other";
+  let currentLines: string[] = [];
+
+  const flushSection = () => {
+    if (!currentLines.length) return;
+
+    const sectionText = currentLines.join("\n").trim();
+    const sectionType =
+      currentSection === "other" ? detectSectionType(sectionText) : currentSection;
+    const sectionChunks = splitSectionIntoChunks(currentLines);
+
+    for (const chunkLines of sectionChunks) {
+      const text = chunkLines.join("\n").trim();
+      if (!text) continue;
+      chunks.push({
+        text,
+        sectionType,
+        title: extractEvidenceTitle(sectionType, chunkLines),
+      });
+    }
+
+    currentLines = [];
+  };
 
   for (const line of lines) {
-    const next = current ? `${current}\n${line}` : line;
-    if (next.length > MAX_CHUNK_LENGTH && current) {
+    const sectionStart = parseSectionStart(line);
+    if (sectionStart) {
+      flushSection();
+      currentSection = sectionStart.sectionType;
+      if (sectionStart.remainingText) currentLines.push(sectionStart.remainingText);
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+
+  flushSection();
+
+  return chunks.length
+    ? chunks
+    : [
+        {
+          text: resumeText.slice(0, MAX_CHUNK_LENGTH),
+          sectionType: detectSectionType(resumeText),
+          title: extractEvidenceTitle(detectSectionType(resumeText), [resumeText]),
+        },
+      ];
+}
+
+function splitSectionIntoChunks(lines: string[]) {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentLength = 0;
+
+  for (const line of lines) {
+    const nextLength = currentLength + line.length + 1;
+    if (nextLength > MAX_CHUNK_LENGTH && current.length) {
       chunks.push(current);
-      current = line;
+      current = [line];
+      currentLength = line.length;
     } else {
-      current = next;
+      current.push(line);
+      currentLength = nextLength;
     }
   }
 
-  if (current) chunks.push(current);
+  if (current.length) chunks.push(current);
 
-  return chunks.length ? chunks : [resumeText.slice(0, MAX_CHUNK_LENGTH)];
+  return chunks;
+}
+
+function parseSectionStart(line: string) {
+  const compactLine = line.replace(/\s+/g, "");
+
+  for (const { sectionType, patterns } of SECTION_HEADERS) {
+    for (const pattern of patterns) {
+      const normalizedPattern = pattern.replace(/\s+/g, "");
+      if (!compactLine.startsWith(normalizedPattern)) continue;
+
+      const remainingText = line
+        .replace(new RegExp(`^${escapeRegExp(pattern)}\\s*[:：｜|\\-—]*\\s*`), "")
+        .trim();
+
+      return {
+        sectionType,
+        remainingText:
+          remainingText && remainingText !== line && !isGenericTitle(remainingText)
+            ? remainingText
+            : "",
+      };
+    }
+  }
+
+  return null;
+}
+
+function extractEvidenceTitle(sectionType: SectionType, lines: string[]) {
+  const candidates = lines
+    .map((line) => cleanEvidenceTitle(line))
+    .filter((line) => line.length >= 2 && !isGenericTitle(line));
+
+  const preferredCandidate =
+    candidates.find((line) => isPreferredTitleCandidate(sectionType, line)) ||
+    candidates[0] ||
+    sectionTypeFallbackTitle(sectionType);
+
+  return preferredCandidate.slice(0, 36);
+}
+
+function cleanEvidenceTitle(line: string) {
+  return line
+    .replace(/[●•]/g, " ")
+    .replace(/[|｜]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/[。；;:：]/)[0]
+    .trim();
+}
+
+function isGenericTitle(text: string) {
+  const compactText = text.replace(/\s+/g, "");
+  return GENERIC_TITLE_PATTERNS.some((pattern) => compactText === pattern);
+}
+
+function isPreferredTitleCandidate(sectionType: SectionType, text: string) {
+  if (sectionType === "project") {
+    return /项目|系统|平台|工具|模型|分析|研究|产品|设计/.test(text);
+  }
+
+  if (sectionType === "internship") {
+    return /实习|公司|部门|HRBP|产品|运营|研发|工程师|助理/.test(text);
+  }
+
+  if (sectionType === "skill") {
+    return /SQL|Python|Java|Excel|Tableau|Figma|技能|工具/i.test(text);
+  }
+
+  if (sectionType === "achievement") {
+    return /奖|证书|荣誉|竞赛|论文|专利/.test(text);
+  }
+
+  return true;
+}
+
+function sectionTypeFallbackTitle(sectionType: SectionType) {
+  const labels: Record<SectionType, string> = {
+    education: "教育背景",
+    internship: "实习经历",
+    project: "项目经历",
+    skill: "技能",
+    achievement: "成果",
+    leadership: "协作经历",
+    other: "简历证据",
+  };
+
+  return labels[sectionType];
 }
 
 function detectSectionType(text: string): SectionType {
@@ -339,14 +530,30 @@ function getDimensionChunkScore(
 ) {
   const rule = DIMENSION_RULES[dimension];
   const sectionScore = rule.preferredSections.includes(chunk.sectionType) ? 3 : 0;
+  const isPreferenceDimension = dimension === "interviewerPreferenceMatch";
+
+  if (!isPreferenceDimension && chunk.sectionType === "education") return 0;
+  if (
+    (dimension === "jobRelevantExperience" ||
+      dimension === "projectEvidenceStrength" ||
+      dimension === "resumeClarity") &&
+    !rule.preferredSections.includes(chunk.sectionType)
+  ) {
+    return 0;
+  }
+
   const ruleKeywordScore = matchKeywords(chunk.text, rule.keywords).length * 2;
   const jdScore = chunk.jdMatchedKeywords.length * 2;
   const preferenceScore =
-    dimension === "interviewerPreferenceMatch"
+    isPreferenceDimension
       ? chunk.preferenceMatchedKeywords.length * 4
       : chunk.preferenceMatchedKeywords.length;
 
   return sectionScore + ruleKeywordScore + jdScore + preferenceScore;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function slugFileName(fileName: string) {

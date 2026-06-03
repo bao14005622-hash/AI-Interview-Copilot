@@ -665,6 +665,8 @@ function sectionTypeLabel(sectionType: EvidenceChunk["sectionType"]) {
 }
 
 function summarizeEvidenceTitle(chunk: EvidenceChunk) {
+  if (chunk.title) return chunk.title;
+
   const cleanedText = chunk.text
     .replace(/[●•]/g, " ")
     .replace(/\s+/g, " ")
@@ -1041,20 +1043,29 @@ function CandidateEvidenceCard({
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {SCORE_DIMENSIONS.map((dimension) => {
           const dimensionScore = candidate.dimensionScores?.[dimension.key];
+          const dimensionMatchedKeywords = Array.from(
+            new Set(dimensionScore?.matchedKeywords || []),
+          ).slice(0, 5);
           const evidenceSummaries = (dimensionScore?.evidenceIds || [])
             .map((evidenceId) => evidenceById.get(evidenceId))
             .filter((chunk): chunk is EvidenceChunk => Boolean(chunk))
-            .map((chunk) => ({
-              id: chunk.id,
-              label: sectionTypeLabel(chunk.sectionType),
-              title: summarizeEvidenceTitle(chunk),
-              keywords: Array.from(
+            .map((chunk) => {
+              const chunkKeywords = Array.from(
                 new Set([
                   ...chunk.jdMatchedKeywords,
                   ...chunk.preferenceMatchedKeywords,
                 ]),
-              ).slice(0, 5),
-            }));
+              ).slice(0, 5);
+
+              return {
+                id: chunk.id,
+                label: sectionTypeLabel(chunk.sectionType),
+                title: summarizeEvidenceTitle(chunk),
+                keywords: chunkKeywords.length
+                  ? chunkKeywords
+                  : dimensionMatchedKeywords,
+              };
+            });
 
           return (
             <div
