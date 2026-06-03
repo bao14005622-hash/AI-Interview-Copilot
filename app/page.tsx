@@ -29,8 +29,6 @@ type CandidateResult = {
   risks: string[];
   recommendation: Recommendation;
   recommendationReason: string;
-  capTriggered: boolean;
-  capReason: string;
 };
 
 type FailedResume = {
@@ -86,9 +84,6 @@ export default function Home() {
       0,
     );
     return Math.round(total / sortedCandidates.length);
-  }, [sortedCandidates]);
-  const cappedCandidateCount = useMemo(() => {
-    return sortedCandidates.filter((candidate) => candidate.capTriggered).length;
   }, [sortedCandidates]);
   const failedResumeMap = useMemo(() => {
     return new Map(
@@ -431,7 +426,7 @@ export default function Home() {
 
           {sortedCandidates.length ? (
             <div className="mt-6 flex flex-col gap-5">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <SummaryCard label="已分析候选人" value={String(sortedCandidates.length)} />
                 <SummaryCard
                   label="最高匹配分"
@@ -439,10 +434,6 @@ export default function Home() {
                 />
                 <SummaryCard label="推荐推进" value={String(recommendedCount)} />
                 <SummaryCard label="平均匹配分" value={`${averageScore}/100`} />
-                <SummaryCard
-                  label="封顶候选人"
-                  value={String(cappedCandidateCount)}
-                />
                 <SummaryCard
                   label="解析失败"
                   value={String(result?.failedResumes?.length || 0)}
@@ -889,9 +880,6 @@ function CandidateRankingTable({
                   <p className="mt-1 max-w-56 truncate text-xs text-slate-500">
                     {candidate.fileName}
                   </p>
-                  {candidate.capTriggered ? (
-                    <CapNotice reason={candidate.capReason} compact />
-                  ) : null}
                 </td>
                 <td className="px-5 py-5 align-top">
                   <p className="text-xl font-semibold text-slate-950">
@@ -950,11 +938,6 @@ function CandidateRankingTable({
                 {recommendationLabel(candidate.recommendation)}
               </span>
             </div>
-            {candidate.capTriggered ? (
-              <div className="mt-4">
-                <CapNotice reason={candidate.capReason} />
-              </div>
-            ) : null}
             <div className="mt-4">
               <p className="mb-2 text-sm font-semibold text-slate-800">
                 评分拆解
@@ -1182,27 +1165,6 @@ function ScoreBreakdownList({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function CapNotice({
-  compact = false,
-  reason,
-}: {
-  compact?: boolean;
-  reason: string;
-}) {
-  return (
-    <div
-      className={`rounded-xl border border-amber-200 bg-amber-50 text-amber-800 ${
-        compact ? "mt-3 px-3 py-2 text-xs" : "px-3 py-2 text-sm"
-      }`}
-    >
-      <span className="font-semibold">触发封顶</span>
-      <span className="ml-1">
-        {reason || "缺少相关实习或项目经历，最高 75 分。"}
-      </span>
     </div>
   );
 }

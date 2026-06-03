@@ -14,7 +14,6 @@ import {
 } from "@/lib/evidence-chunks";
 import {
   normalizeScoreBreakdown,
-  SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE,
   SCORE_DIMENSIONS,
   type ScoreBreakdown,
   type ScoreBreakdownKey,
@@ -48,8 +47,6 @@ type CandidateAnalysis = {
   risks: string[];
   recommendation: "Yes" | "Maybe" | "No";
   recommendationReason: string;
-  capTriggered: boolean;
-  capReason: string;
 };
 
 type BatchAnalysis = {
@@ -223,7 +220,6 @@ function buildBatchAnalysisPrompt({
     ...SCORE_DIMENSIONS.map(
       (dimension) => `- ${dimension.label}：${dimension.maxScore} 分。`,
     ),
-    `- 如果候选人没有相关实习经历，也没有相关项目经历，matchScore 最高只能是 ${SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE} 分。`,
     "- 相关经历包括产品经理实习、运营、数据分析、商业分析、用户研究、增长、战略，或能体现 PRD、用户调研、竞品分析、需求拆解、数据分析、项目推进、业务复盘等能力的项目。",
     "- 面试官偏好只占 15 分，按行优先级递减；它会影响排序，但不能覆盖 JD 相关度和项目证据。",
     "- 不要编造简历中没有的经历、数据或成果。缺少证据时应写入 risks。",
@@ -255,9 +251,7 @@ function buildBatchAnalysisPrompt({
     '      "strengths": string[],',
     '      "risks": string[],',
     '      "recommendation": "Yes" | "Maybe" | "No",',
-    '      "recommendationReason": string,',
-    '      "capTriggered": boolean,',
-    '      "capReason": string',
+    '      "recommendationReason": string',
     "    }",
     "  ]",
     "}",
@@ -272,8 +266,6 @@ function buildBatchAnalysisPrompt({
     "- dimensionScores 中每个维度的 score 必须和 scoreBreakdown 对应字段一致。",
     "- dimensionScores 中每个 evidenceIds 只能引用输入 evidence chunks 中存在的 id。",
     "- 不要在 JSON 中返回完整简历原文或完整 evidence chunk 文本，只返回 evidenceIds 和简短解释。",
-    `- capTriggered 为 true 时，matchScore 必须小于等于 ${SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE}，capReason 必须说明缺少相关实习或项目经历。`,
-    "- capTriggered 为 false 时，capReason 返回空字符串。",
     "- 85-100 分 recommendation 为 Yes；75-84 分通常为 Maybe；60-74 分为 Maybe 或 No；0-59 分为 No。",
     "- strengths 输出 2 到 4 个简洁中文短语。",
     "- risks 输出 2 到 4 个简洁中文短语。",
@@ -337,7 +329,6 @@ function normalizeCandidateAnalysis(
     scoreBreakdown,
     fallbackResume,
   );
-  const capTriggered = candidate.capTriggered === true;
   const rawMatchScore = Math.max(
     0,
     Math.min(100, Math.round(candidate.matchScore)),
@@ -353,9 +344,7 @@ function normalizeCandidateAnalysis(
       typeof candidate.fileName === "string" && candidate.fileName.trim()
         ? candidate.fileName.trim()
         : fallbackResume.fileName,
-    matchScore: capTriggered
-      ? Math.min(rawMatchScore, SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE)
-      : rawMatchScore,
+    matchScore: rawMatchScore,
     matchLevel:
       typeof candidate.matchLevel === "string" && candidate.matchLevel.trim()
         ? candidate.matchLevel.trim()
@@ -375,15 +364,6 @@ function normalizeCandidateAnalysis(
       candidate.recommendationReason.trim()
         ? candidate.recommendationReason.trim()
         : "建议在面试中进一步验证候选人与岗位要求的匹配度。",
-    capTriggered,
-    capReason:
-      capTriggered &&
-      typeof candidate.capReason === "string" &&
-      candidate.capReason.trim()
-        ? candidate.capReason.trim()
-        : capTriggered
-          ? "由于简历中缺少相关实习或相关项目经历，候选人总分最高限制为 75 分。"
-          : "",
   };
 }
 

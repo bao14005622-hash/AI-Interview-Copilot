@@ -172,7 +172,7 @@ const DIMENSION_RULES: Record<
     limit: 3,
   },
   projectEvidenceStrength: {
-    preferredSections: ["project", "internship", "achievement"],
+    preferredSections: ["project", "internship"],
     keywords: ["项目", "结果", "数据", "指标", "产出", "上线", "优化", "复盘", "负责"],
     limit: 3,
   },
@@ -386,7 +386,10 @@ function parseSectionStart(line: string) {
   for (const { sectionType, patterns } of SECTION_HEADERS) {
     for (const pattern of patterns) {
       const normalizedPattern = pattern.replace(/\s+/g, "");
-      if (!compactLine.startsWith(normalizedPattern)) continue;
+      const headerPattern = new RegExp(
+        `^${escapeRegExp(pattern)}\\s*($|[:：｜|\\-—])`,
+      );
+      if (compactLine !== normalizedPattern && !headerPattern.test(line)) continue;
 
       const remainingText = line
         .replace(new RegExp(`^${escapeRegExp(pattern)}\\s*[:：｜|\\-—]*\\s*`), "")
@@ -532,6 +535,7 @@ function getDimensionChunkScore(
   const sectionScore = rule.preferredSections.includes(chunk.sectionType) ? 3 : 0;
   const isPreferenceDimension = dimension === "interviewerPreferenceMatch";
 
+  if (isLowValueEvidenceChunk(chunk)) return 0;
   if (!isPreferenceDimension && chunk.sectionType === "education") return 0;
   if (
     (dimension === "jobRelevantExperience" ||
@@ -550,6 +554,25 @@ function getDimensionChunkScore(
       : chunk.preferenceMatchedKeywords.length;
 
   return sectionScore + ruleKeywordScore + jdScore + preferenceScore;
+}
+
+function isLowValueEvidenceChunk(chunk: EvidenceChunk) {
+  const content = `${chunk.title} ${chunk.text}`.toLowerCase();
+  const hasContactSignal =
+    /出生年月|出生日期|年龄|性别|籍贯|民族|政治面貌|联系方式|电话|手机|邮箱|email|wechat|微信|resume/.test(
+      content,
+    ) ||
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(content) ||
+    /\b1[3-9]\d{9}\b/.test(content);
+
+  if (!hasContactSignal) return false;
+
+  const hasStrongExperienceSignal =
+    /项目|实习|负责|推进|分析|调研|设计|上线|优化|指标|产出|用户|业务|产品|研发|开发/.test(
+      content,
+    );
+
+  return !hasStrongExperienceSignal || chunk.sectionType === "other";
 }
 
 function escapeRegExp(value: string) {

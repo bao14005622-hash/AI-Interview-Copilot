@@ -8,8 +8,6 @@ export type ScoreBreakdown = {
 
 export type ScoreBreakdownKey = keyof ScoreBreakdown;
 
-export const SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE = 75;
-
 export const SCORE_DIMENSIONS: {
   key: ScoreBreakdownKey;
   label: string;
