@@ -588,13 +588,21 @@ async function fetchAnalyzeWithRetry(body: {
   jobDescription: string;
   interviewerPreferences: string;
 }) {
+  const requestBody = {
+    ...body,
+    resumes: body.resumes.map((resume) => ({
+      fileName: resume.fileName,
+      text: resume.text,
+    })),
+  };
+
   try {
     return await fetch("/api/analyze", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       cache: "no-store",
     });
   } catch {
@@ -603,7 +611,7 @@ async function fetchAnalyzeWithRetry(body: {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       cache: "no-store",
     });
   }
@@ -640,20 +648,6 @@ function recommendationClass(recommendation: Recommendation) {
   if (recommendation === "Yes") return "bg-emerald-50 text-emerald-700";
   if (recommendation === "Maybe") return "bg-amber-50 text-amber-700";
   return "bg-red-50 text-red-700";
-}
-
-function sectionTypeLabel(sectionType: EvidenceChunk["sectionType"]) {
-  const labels: Record<EvidenceChunk["sectionType"], string> = {
-    education: "教育",
-    internship: "实习",
-    project: "项目",
-    skill: "技能",
-    achievement: "成果",
-    leadership: "协作",
-    other: "其他",
-  };
-
-  return labels[sectionType] || "其他";
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -967,10 +961,10 @@ function EvidenceChainSection({
       <div>
         <p className="text-sm font-semibold text-emerald-700">评分证据链</p>
         <h3 className="mt-1 text-xl font-semibold text-slate-950">
-          基于 evidenceIds 的可解释评分
+          缺失证据与评分理由
         </h3>
         <p className="mt-2 text-sm leading-6 text-slate-500">
-          每个维度都展示命中的简历证据、缺失证据和评分理由，避免 AI 只给结论。
+          页面只保留影响判断的缺失项和简短理由，避免展示大段简历原文。
         </p>
       </div>
 
@@ -994,10 +988,6 @@ function CandidateEvidenceCard({
   candidate: CandidateResult;
   index: number;
 }) {
-  const evidenceById = new Map(
-    (candidate.evidenceChunks || []).map((chunk) => [chunk.id, chunk]),
-  );
-
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1021,9 +1011,6 @@ function CandidateEvidenceCard({
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {SCORE_DIMENSIONS.map((dimension) => {
           const dimensionScore = candidate.dimensionScores?.[dimension.key];
-          const evidenceChunks = (dimensionScore?.evidenceIds || [])
-            .map((evidenceId) => evidenceById.get(evidenceId))
-            .filter((chunk): chunk is EvidenceChunk => Boolean(chunk));
 
           return (
             <div
@@ -1036,40 +1023,12 @@ function CandidateEvidenceCard({
                     {dimension.label}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    JD / 偏好命中关键词：
-                    {dimensionScore?.matchedKeywords?.length
-                      ? dimensionScore.matchedKeywords.join("、")
-                      : "暂无明确命中"}
+                    引用证据：{dimensionScore?.evidenceIds?.length || 0} 条
                   </p>
                 </div>
                 <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
                   {dimensionScore?.score ?? 0}/{dimension.maxScore}
                 </span>
-              </div>
-
-              <div className="mt-3">
-                <p className="text-xs font-semibold text-slate-700">
-                  命中简历证据
-                </p>
-                {evidenceChunks.length ? (
-                  <div className="mt-2 grid gap-2">
-                    {evidenceChunks.map((chunk) => (
-                      <blockquote
-                        className="rounded-xl border border-emerald-100 bg-white p-3 text-xs leading-5 text-slate-600"
-                        key={chunk.id}
-                      >
-                        <p className="font-semibold text-emerald-700">
-                          {chunk.id} · {sectionTypeLabel(chunk.sectionType)}
-                        </p>
-                        <p className="mt-1">{chunk.text}</p>
-                      </blockquote>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 rounded-xl border border-amber-100 bg-white p-3 text-xs text-amber-700">
-                    该维度暂无可引用证据。
-                  </p>
-                )}
               </div>
 
               <div className="mt-3">

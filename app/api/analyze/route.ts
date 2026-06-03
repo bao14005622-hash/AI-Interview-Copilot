@@ -67,7 +67,6 @@ type BatchAnalyzeJsonBody = {
 export const runtime = "nodejs";
 
 const MAX_RESUME_COUNT = 20;
-const MAX_RESUME_TEXT_LENGTH = 7000;
 
 export async function POST(request: NextRequest) {
   try {
@@ -209,8 +208,6 @@ function buildBatchAnalysisPrompt({
         formatEvidenceChunksForPrompt(resume.evidenceChunks),
         "按评分维度召回结果：",
         formatDimensionEvidenceForPrompt(resume.evidenceByDimension),
-        "完整简历文本摘要：",
-        resume.text.slice(0, MAX_RESUME_TEXT_LENGTH),
       ].join("\n"),
     )
     .join("\n\n---\n\n");
@@ -255,7 +252,6 @@ function buildBatchAnalysisPrompt({
     '        "resumeClarity": { "score": number, "maxScore": 10, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string },',
     '        "interviewerPreferenceMatch": { "score": number, "maxScore": 15, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string }',
     "      },",
-    '      "evidenceChunks": EvidenceChunk[],',
     '      "strengths": string[],',
     '      "risks": string[],',
     '      "recommendation": "Yes" | "Maybe" | "No",',
@@ -275,7 +271,7 @@ function buildBatchAnalysisPrompt({
     "- scoreBreakdown 中每一项不能超过对应维度满分。",
     "- dimensionScores 中每个维度的 score 必须和 scoreBreakdown 对应字段一致。",
     "- dimensionScores 中每个 evidenceIds 只能引用输入 evidence chunks 中存在的 id。",
-    "- evidenceChunks 返回本候选人实际用于评分的证据 chunks，不要返回输入之外的新 chunk。",
+    "- 不要在 JSON 中返回完整简历原文或完整 evidence chunk 文本，只返回 evidenceIds 和简短解释。",
     `- capTriggered 为 true 时，matchScore 必须小于等于 ${SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE}，capReason 必须说明缺少相关实习或项目经历。`,
     "- capTriggered 为 false 时，capReason 返回空字符串。",
     "- 85-100 分 recommendation 为 Yes；75-84 分通常为 Maybe；60-74 分为 Maybe 或 No；0-59 分为 No。",

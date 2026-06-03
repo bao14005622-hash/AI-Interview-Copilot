@@ -36,7 +36,7 @@ export type DimensionEvidenceKey = ScoreBreakdownKey;
 
 export type DimensionEvidenceMap = Record<DimensionEvidenceKey, DimensionEvidence>;
 
-const MAX_CHUNK_LENGTH = 420;
+const MAX_CHUNK_LENGTH = 260;
 const MIN_CHUNK_LENGTH = 18;
 const MAX_SELECTED_EVIDENCE_CHUNKS = 10;
 
