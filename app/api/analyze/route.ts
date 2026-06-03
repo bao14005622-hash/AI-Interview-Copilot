@@ -459,7 +459,7 @@ function buildFallbackAgentFlow({
       agentName: "Evidence Agent",
       status: "completed",
       inputSummary: "JD 关键词、偏好关键词与简历 evidence chunks",
-      outputSummary: `召回 ${uniqueEvidenceCount} 条评分证据，识别 ${missingEvidenceCount} 个缺失证据点。`,
+      outputSummary: `完成评分依据整理，识别 ${missingEvidenceCount} 个缺失项。`,
       confidence: getAgentConfidence(0.7, uniqueEvidenceCount),
       evidenceCount: uniqueEvidenceCount,
     },
@@ -474,7 +474,7 @@ function buildFallbackAgentFlow({
     {
       agentName: "Risk Agent",
       status: "completed",
-      inputSummary: "候选人风险点、缺失证据和岗位要求",
+      inputSummary: "候选人风险点和岗位要求",
       outputSummary: risks.length
         ? `主要风险：${risks.slice(0, 3).join("、")}。`
         : "暂未发现突出风险，建议面试中继续验证。",

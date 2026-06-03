@@ -992,10 +992,10 @@ function CandidateDetail({ candidate }: { candidate: CandidateResult }) {
         <div>
           <p className="text-sm font-semibold text-emerald-700">候选人详情</p>
           <h4 className="mt-1 text-lg font-semibold text-slate-950">
-            五维评分与证据解释
+            五维评分与分析理由
           </h4>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            展示影响评分的缺失证据、缺失关键词和简短评分理由。
+            展示每个评分维度的分数、缺失关键词和简短评分理由。
           </p>
         </div>
         <div className="rounded-xl bg-slate-950 px-4 py-3 text-white">
@@ -1050,24 +1050,12 @@ function DimensionDetailCard({
             {dimension.label}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            仅展示缺失项和评分理由
+            评分理由
           </p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
           {dimensionScore?.score ?? 0}/{dimension.maxScore}
         </span>
-      </div>
-
-      <div className="mt-3">
-        <p className="text-xs font-semibold text-slate-700">缺失证据</p>
-        <TagList
-          items={
-            dimensionScore?.missingEvidence?.length
-              ? dimensionScore.missingEvidence
-              : ["暂无明显缺失"]
-          }
-          tone="risk"
-        />
       </div>
 
       {dimensionScore?.missingKeywords?.length ? (
