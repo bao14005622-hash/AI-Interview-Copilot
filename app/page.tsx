@@ -9,6 +9,7 @@ import type {
   DimensionEvidenceMap,
   EvidenceChunk,
 } from "@/lib/evidence-chunks";
+import type { AgentFlowStep } from "@/lib/agent-flow";
 
 type Recommendation = "Yes" | "Maybe" | "No";
 
@@ -29,6 +30,7 @@ type CandidateResult = {
   risks: string[];
   recommendation: Recommendation;
   recommendationReason: string;
+  agentFlow: AgentFlowStep[];
 };
 
 type FailedResume = {
@@ -441,6 +443,7 @@ export default function Home() {
               </div>
 
               <CandidateRankingTable candidates={sortedCandidates} />
+              <AgentFlowSection candidates={sortedCandidates} />
               <EvidenceChainSection candidates={sortedCandidates} />
             </div>
           ) : (
@@ -932,6 +935,148 @@ function CandidateRankingTable({
       </div>
     </div>
   );
+}
+
+function AgentFlowSection({
+  candidates,
+}: {
+  candidates: CandidateResult[];
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white">
+      <div>
+        <p className="text-sm font-semibold text-emerald-300">AI分析流程</p>
+        <h3 className="mt-1 text-xl font-semibold">
+          单次 LLM 调用模拟 Multi-Agent Flow
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-300">
+          每位候选人都会展示 JD、简历解析、证据检索、评分、风险和排序 6 个步骤，帮助你解释系统是如何得出结论的。
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        {candidates.map((candidate, index) => (
+          <CandidateAgentFlow
+            candidate={candidate}
+            index={index}
+            key={`${candidate.fileName}-agent-flow-${index}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CandidateAgentFlow({
+  candidate,
+  index,
+}: {
+  candidate: CandidateResult;
+  index: number;
+}) {
+  const steps = candidate.agentFlow || [];
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold text-emerald-300">
+            第 {index + 1} 名
+          </p>
+          <h4 className="mt-1 text-lg font-semibold text-white">
+            {candidate.candidateName}
+          </h4>
+          <p className="mt-1 break-all text-xs text-slate-400">
+            {candidate.fileName}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white px-3 py-2 text-right text-slate-950">
+          <p className="text-lg font-semibold">{candidate.matchScore}/100</p>
+          <p className="text-xs text-slate-500">{candidate.matchLevel}</p>
+        </div>
+      </div>
+
+      {steps.length ? (
+        <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
+          {steps.map((step, stepIndex) => (
+            <AgentFlowStepCard
+              step={step}
+              stepIndex={stepIndex}
+              key={`${candidate.fileName}-${step.agentName}-${stepIndex}`}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-amber-200/40 bg-amber-50/10 px-4 py-3 text-sm text-amber-100">
+          暂无流程数据，建议重新分析该候选人。
+        </div>
+      )}
+    </article>
+  );
+}
+
+function AgentFlowStepCard({
+  step,
+  stepIndex,
+}: {
+  step: AgentFlowStep;
+  stepIndex: number;
+}) {
+  return (
+    <div className="min-w-[230px] rounded-2xl border border-white/10 bg-white p-4 text-slate-950 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-50 text-xs font-bold text-emerald-700">
+            {stepIndex + 1}
+          </span>
+          <h5 className="text-sm font-semibold">{step.agentName}</h5>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${agentStatusClass(step.status)}`}
+        >
+          {agentStatusLabel(step.status)}
+        </span>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">输入摘要</p>
+          <p className="mt-1 text-sm leading-5 text-slate-700">
+            {step.inputSummary}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold text-slate-500">输出摘要</p>
+          <p className="mt-1 text-sm leading-5 text-slate-700">
+            {step.outputSummary}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs font-semibold text-slate-500">
+        <span>置信度 {formatConfidence(step.confidence)}</span>
+        <span>证据 {step.evidenceCount} 条</span>
+      </div>
+    </div>
+  );
+}
+
+function agentStatusLabel(status: AgentFlowStep["status"]) {
+  if (status === "running") return "运行中";
+  if (status === "pending") return "等待中";
+  if (status === "failed") return "失败";
+  return "已完成";
+}
+
+function agentStatusClass(status: AgentFlowStep["status"]) {
+  if (status === "running") return "bg-amber-50 text-amber-700";
+  if (status === "pending") return "bg-slate-100 text-slate-600";
+  if (status === "failed") return "bg-red-50 text-red-700";
+  return "bg-emerald-50 text-emerald-700";
+}
+
+function formatConfidence(confidence: number) {
+  return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`;
 }
 
 function EvidenceChainSection({

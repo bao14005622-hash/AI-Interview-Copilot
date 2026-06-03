@@ -18,6 +18,10 @@ import {
   type ScoreBreakdown,
   type ScoreBreakdownKey,
 } from "@/lib/candidate-scoring";
+import {
+  normalizeAgentFlowSteps,
+  type AgentFlowStep,
+} from "@/lib/agent-flow";
 
 type CandidateResume = {
   fileName: string;
@@ -47,6 +51,7 @@ type CandidateAnalysis = {
   risks: string[];
   recommendation: "Yes" | "Maybe" | "No";
   recommendationReason: string;
+  agentFlow: AgentFlowStep[];
 };
 
 type BatchAnalysis = {
@@ -251,7 +256,15 @@ function buildBatchAnalysisPrompt({
     '      "strengths": string[],',
     '      "risks": string[],',
     '      "recommendation": "Yes" | "Maybe" | "No",',
-    '      "recommendationReason": string',
+    '      "recommendationReason": string,',
+    '      "agentFlow": [',
+    '        { "agentName": "JD Agent", "status": "completed", "inputSummary": string, "outputSummary": string, "confidence": number, "evidenceCount": number },',
+    '        { "agentName": "Resume Agent", "status": "completed", "inputSummary": string, "outputSummary": string, "confidence": number, "evidenceCount": number },',
+    '        { "agentName": "Evidence Agent", "status": "completed", "inputSummary": string, "outputSummary": string, "confidence": number, "evidenceCount": number },',
+    '        { "agentName": "Scoring Agent", "status": "completed", "inputSummary": string, "outputSummary": string, "confidence": number, "evidenceCount": number },',
+    '        { "agentName": "Risk Agent", "status": "completed", "inputSummary": string, "outputSummary": string, "confidence": number, "evidenceCount": number },',
+    '        { "agentName": "Ranking Agent", "status": "completed", "inputSummary": string, "outputSummary": string, "confidence": number, "evidenceCount": number }',
+    "      ]",
     "    }",
     "  ]",
     "}",
@@ -272,6 +285,9 @@ function buildBatchAnalysisPrompt({
     "- recommendation 只能是 Yes、Maybe 或 No。",
     "- recommendationReason 使用中文，一句话说明推荐或不推荐的主要原因。",
     "- 面试官偏好按行优先级递减，越靠前权重越高。",
+    "- agentFlow 必须包含 6 个步骤，agentName 必须严格为 JD Agent、Resume Agent、Evidence Agent、Scoring Agent、Risk Agent、Ranking Agent。",
+    "- agentFlow.status 分析完成后统一返回 completed；confidence 为 0 到 1 的数字；evidenceCount 为该步骤引用或产出的证据数量。",
+    "- agentFlow 的 inputSummary 和 outputSummary 用中文短句概括，不要返回完整简历原文。",
     "",
     `岗位描述：\n${jobDescription}`,
     "",
@@ -329,21 +345,35 @@ function normalizeCandidateAnalysis(
     scoreBreakdown,
     fallbackResume,
   );
+  const candidateName =
+    typeof candidate.candidateName === "string" &&
+    candidate.candidateName.trim()
+      ? candidate.candidateName.trim()
+      : `候选人 ${index + 1}`;
+  const fileName =
+    typeof candidate.fileName === "string" && candidate.fileName.trim()
+      ? candidate.fileName.trim()
+      : fallbackResume.fileName;
   const rawMatchScore = Math.max(
     0,
     Math.min(100, Math.round(candidate.matchScore)),
   );
+  const evidenceChunks = normalizeReferencedEvidenceChunks(
+    candidate.evidenceChunks,
+    fallbackResume.evidenceChunks,
+    dimensionScores,
+  );
+  const strengths = candidate.strengths.map(String).slice(0, 4);
+  const risks = candidate.risks.map(String).slice(0, 4);
+  const recommendationReason =
+    typeof candidate.recommendationReason === "string" &&
+    candidate.recommendationReason.trim()
+      ? candidate.recommendationReason.trim()
+      : "建议在面试中进一步验证候选人与岗位要求的匹配度。";
 
   return {
-    candidateName:
-      typeof candidate.candidateName === "string" &&
-      candidate.candidateName.trim()
-        ? candidate.candidateName.trim()
-        : `候选人 ${index + 1}`,
-    fileName:
-      typeof candidate.fileName === "string" && candidate.fileName.trim()
-        ? candidate.fileName.trim()
-        : fallbackResume.fileName,
+    candidateName,
+    fileName,
     matchScore: rawMatchScore,
     matchLevel:
       typeof candidate.matchLevel === "string" && candidate.matchLevel.trim()
@@ -351,20 +381,127 @@ function normalizeCandidateAnalysis(
         : "Medium Match",
     scoreBreakdown,
     dimensionScores,
-    evidenceChunks: normalizeReferencedEvidenceChunks(
-      candidate.evidenceChunks,
-      fallbackResume.evidenceChunks,
-      dimensionScores,
-    ),
-    strengths: candidate.strengths.map(String).slice(0, 4),
-    risks: candidate.risks.map(String).slice(0, 4),
+    evidenceChunks,
+    strengths,
+    risks,
     recommendation,
-    recommendationReason:
-      typeof candidate.recommendationReason === "string" &&
-      candidate.recommendationReason.trim()
-        ? candidate.recommendationReason.trim()
-        : "建议在面试中进一步验证候选人与岗位要求的匹配度。",
+    recommendationReason,
+    agentFlow: normalizeAgentFlowSteps(
+      candidate.agentFlow,
+      buildFallbackAgentFlow({
+        candidateName,
+        fileName,
+        fallbackResume,
+        matchScore: rawMatchScore,
+        scoreBreakdown,
+        dimensionScores,
+        strengths,
+        risks,
+        recommendation,
+        recommendationReason,
+      }),
+    ),
   };
+}
+
+function buildFallbackAgentFlow({
+  candidateName,
+  fileName,
+  fallbackResume,
+  matchScore,
+  scoreBreakdown,
+  dimensionScores,
+  strengths,
+  risks,
+  recommendation,
+  recommendationReason,
+}: {
+  candidateName: string;
+  fileName: string;
+  fallbackResume: EvidencePreparedResume;
+  matchScore: number;
+  scoreBreakdown: ScoreBreakdown;
+  dimensionScores: DimensionEvidenceMap;
+  strengths: string[];
+  risks: string[];
+  recommendation: "Yes" | "Maybe" | "No";
+  recommendationReason: string;
+}): AgentFlowStep[] {
+  const uniqueEvidenceCount = getUniqueEvidenceCount(dimensionScores);
+  const missingEvidenceCount = SCORE_DIMENSIONS.reduce(
+    (total, dimension) =>
+      total + (dimensionScores[dimension.key]?.missingEvidence?.length || 0),
+    0,
+  );
+  const scoreSummary = SCORE_DIMENSIONS.map(
+    (dimension) =>
+      `${dimension.label} ${scoreBreakdown[dimension.key]}/${dimension.maxScore}`,
+  ).join("、");
+
+  return [
+    {
+      agentName: "JD Agent",
+      status: "completed",
+      inputSummary: "岗位 JD 与面试官偏好优先级",
+      outputSummary: "已提取岗位要求、关键能力和潜在岗位风险。",
+      confidence: 0.86,
+      evidenceCount: 0,
+    },
+    {
+      agentName: "Resume Agent",
+      status: "completed",
+      inputSummary: `${candidateName} · ${fileName}`,
+      outputSummary: "已解析候选人经历、技能、项目和可用于评分的简历片段。",
+      confidence: getAgentConfidence(0.76, fallbackResume.evidenceChunks.length),
+      evidenceCount: fallbackResume.evidenceChunks.length,
+    },
+    {
+      agentName: "Evidence Agent",
+      status: "completed",
+      inputSummary: "JD 关键词、偏好关键词与简历 evidence chunks",
+      outputSummary: `召回 ${uniqueEvidenceCount} 条评分证据，识别 ${missingEvidenceCount} 个缺失证据点。`,
+      confidence: getAgentConfidence(0.7, uniqueEvidenceCount),
+      evidenceCount: uniqueEvidenceCount,
+    },
+    {
+      agentName: "Scoring Agent",
+      status: "completed",
+      inputSummary: "五维评分模型与证据链",
+      outputSummary: `综合分 ${matchScore}/100；${scoreSummary}。`,
+      confidence: getAgentConfidence(0.74, uniqueEvidenceCount),
+      evidenceCount: uniqueEvidenceCount,
+    },
+    {
+      agentName: "Risk Agent",
+      status: "completed",
+      inputSummary: "候选人风险点、缺失证据和岗位要求",
+      outputSummary: risks.length
+        ? `主要风险：${risks.slice(0, 3).join("、")}。`
+        : "暂未发现突出风险，建议面试中继续验证。",
+      confidence: getAgentConfidence(0.68, risks.length + missingEvidenceCount),
+      evidenceCount: risks.length + missingEvidenceCount,
+    },
+    {
+      agentName: "Ranking Agent",
+      status: "completed",
+      inputSummary: "候选人综合分、推荐结论和横向排序",
+      outputSummary: `推荐结论 ${recommendation}：${recommendationReason}`,
+      confidence: getAgentConfidence(0.72, strengths.length + uniqueEvidenceCount),
+      evidenceCount: uniqueEvidenceCount,
+    },
+  ];
+}
+
+function getUniqueEvidenceCount(dimensionScores: DimensionEvidenceMap) {
+  return new Set(
+    SCORE_DIMENSIONS.flatMap(
+      (dimension) => dimensionScores[dimension.key]?.evidenceIds || [],
+    ),
+  ).size;
+}
+
+function getAgentConfidence(base: number, evidenceCount: number) {
+  return Math.round(Math.min(0.95, base + Math.min(evidenceCount, 6) * 0.03) * 100) / 100;
 }
 
 function normalizeRecommendation(

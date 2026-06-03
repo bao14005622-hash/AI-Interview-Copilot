@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:evidence": "tsx --test tests/evidence-chunks.test.ts"
+    "test:evidence": "tsx --test tests/evidence-chunks.test.ts",
+    "test:agent-flow": "tsx --test tests/agent-flow.test.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.0",
