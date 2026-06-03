@@ -10,6 +10,10 @@ import type {
   EvidenceChunk,
 } from "@/lib/evidence-chunks";
 import type { AgentFlowStep } from "@/lib/agent-flow";
+import {
+  getDisplayEvidenceItems,
+  type DisplayEvidenceItem,
+} from "@/lib/evidence-display";
 
 type Recommendation = "Yes" | "Maybe" | "No";
 
@@ -1045,7 +1049,10 @@ function DimensionDetailCard({
   dimension: (typeof SCORE_DIMENSIONS)[number];
   dimensionScore?: DimensionEvidenceMap[keyof DimensionEvidenceMap];
 }) {
-  const hitEvidence = getHitEvidence(candidate, dimensionScore?.evidenceIds || []);
+  const hitEvidence = getDisplayEvidenceItems(
+    candidate.evidenceChunks || [],
+    dimensionScore?.evidenceIds || [],
+  );
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1081,7 +1088,7 @@ function DimensionDetailCard({
                   </span>
                 </div>
                 <p className="mt-1 text-xs leading-5 text-slate-500">
-                  关键词：{getEvidenceKeywords(evidence).join("、") || "暂无明确关键词"}
+                  关键词：{evidence.keywords.join("、") || "暂无明确关键词"}
                 </p>
               </div>
             ))}
@@ -1168,28 +1175,8 @@ function AgentFlowTimeline({ steps }: { steps: AgentFlowStep[] }) {
   );
 }
 
-function getHitEvidence(candidate: CandidateResult, evidenceIds: string[]) {
-  const evidenceById = new Map(
-    (candidate.evidenceChunks || []).map((chunk) => [chunk.id, chunk]),
-  );
-
-  return evidenceIds
-    .map((evidenceId) => evidenceById.get(evidenceId))
-    .filter((evidence): evidence is EvidenceChunk => Boolean(evidence))
-    .slice(0, 3);
-}
-
-function getEvidenceKeywords(evidence: EvidenceChunk) {
-  return Array.from(
-    new Set([
-      ...evidence.jdMatchedKeywords,
-      ...evidence.preferenceMatchedKeywords,
-    ]),
-  ).slice(0, 5);
-}
-
-function sectionTypeLabel(sectionType: EvidenceChunk["sectionType"]) {
-  const labels: Record<EvidenceChunk["sectionType"], string> = {
+function sectionTypeLabel(sectionType: DisplayEvidenceItem["sectionType"]) {
+  const labels: Record<DisplayEvidenceItem["sectionType"], string> = {
     education: "教育",
     internship: "实习",
     project: "项目",
