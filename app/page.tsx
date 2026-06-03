@@ -650,6 +650,32 @@ function recommendationClass(recommendation: Recommendation) {
   return "bg-red-50 text-red-700";
 }
 
+function sectionTypeLabel(sectionType: EvidenceChunk["sectionType"]) {
+  const labels: Record<EvidenceChunk["sectionType"], string> = {
+    education: "教育经历",
+    internship: "实习经历",
+    project: "项目经历",
+    skill: "技能",
+    achievement: "成果",
+    leadership: "协作经历",
+    other: "其他证据",
+  };
+
+  return labels[sectionType] || "其他证据";
+}
+
+function summarizeEvidenceTitle(chunk: EvidenceChunk) {
+  const cleanedText = chunk.text
+    .replace(/[●•]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const titleCandidate =
+    cleanedText.split(/[。；;:：｜|]/).find((part) => part.trim().length >= 3) ||
+    cleanedText;
+
+  return titleCandidate.trim().slice(0, 24);
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-20 rounded-xl border border-slate-100 bg-white px-3 py-3 shadow-sm">
@@ -988,6 +1014,10 @@ function CandidateEvidenceCard({
   candidate: CandidateResult;
   index: number;
 }) {
+  const evidenceById = new Map(
+    (candidate.evidenceChunks || []).map((chunk) => [chunk.id, chunk]),
+  );
+
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1011,6 +1041,20 @@ function CandidateEvidenceCard({
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {SCORE_DIMENSIONS.map((dimension) => {
           const dimensionScore = candidate.dimensionScores?.[dimension.key];
+          const evidenceSummaries = (dimensionScore?.evidenceIds || [])
+            .map((evidenceId) => evidenceById.get(evidenceId))
+            .filter((chunk): chunk is EvidenceChunk => Boolean(chunk))
+            .map((chunk) => ({
+              id: chunk.id,
+              label: sectionTypeLabel(chunk.sectionType),
+              title: summarizeEvidenceTitle(chunk),
+              keywords: Array.from(
+                new Set([
+                  ...chunk.jdMatchedKeywords,
+                  ...chunk.preferenceMatchedKeywords,
+                ]),
+              ).slice(0, 5),
+            }));
 
           return (
             <div
@@ -1029,6 +1073,41 @@ function CandidateEvidenceCard({
                 <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
                   {dimensionScore?.score ?? 0}/{dimension.maxScore}
                 </span>
+              </div>
+
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-slate-700">
+                  命中证据
+                </p>
+                {evidenceSummaries.length ? (
+                  <div className="mt-2 grid gap-2">
+                    {evidenceSummaries.map((evidence) => (
+                      <div
+                        className="rounded-xl border border-emerald-100 bg-white p-3"
+                        key={evidence.id}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                            {evidence.label}
+                          </span>
+                          <span className="text-sm font-semibold text-slate-900">
+                            {evidence.title}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-slate-500">
+                          关键词：
+                          {evidence.keywords.length
+                            ? evidence.keywords.join("、")
+                            : "暂无明确关键词"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 rounded-xl border border-amber-100 bg-white p-3 text-xs text-amber-700">
+                    该维度暂无可引用证据。
+                  </p>
+                )}
               </div>
 
               <div className="mt-3">

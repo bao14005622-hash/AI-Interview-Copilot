@@ -335,7 +335,7 @@ function normalizeCandidateAnalysis(
   const dimensionScores = normalizeDimensionScores(
     candidate.dimensionScores,
     scoreBreakdown,
-    fallbackResume.evidenceChunks,
+    fallbackResume,
   );
   const capTriggered = candidate.capTriggered === true;
   const rawMatchScore = Math.max(
@@ -546,20 +546,32 @@ function formatDimensionEvidenceForPrompt(
 function normalizeDimensionScores(
   value: unknown,
   scoreBreakdown: ScoreBreakdown,
-  availableEvidenceChunks: EvidenceChunk[],
+  fallbackResume: EvidencePreparedResume,
 ): DimensionEvidenceMap {
   const source =
     typeof value === "object" && value !== null
       ? (value as Partial<DimensionEvidenceMap>)
       : {};
+  const availableEvidenceChunks = fallbackResume.evidenceChunks;
   const availableIds = new Set(availableEvidenceChunks.map((chunk) => chunk.id));
 
   return SCORE_DIMENSIONS.reduce<DimensionEvidenceMap>((result, dimension) => {
     const rawDimension = source[dimension.key];
+    const fallbackChunks = fallbackResume.evidenceByDimension[dimension.key] || [];
+    const fallbackEvidenceIds = fallbackChunks.map((chunk) => chunk.id);
     const rawEvidenceIds = Array.isArray(rawDimension?.evidenceIds)
       ? rawDimension.evidenceIds.map(String)
       : [];
     const evidenceIds = rawEvidenceIds.filter((id) => availableIds.has(id));
+    const finalEvidenceIds = evidenceIds.length ? evidenceIds : fallbackEvidenceIds;
+    const fallbackMatchedKeywords = Array.from(
+      new Set(
+        fallbackChunks.flatMap((chunk) => [
+          ...chunk.jdMatchedKeywords,
+          ...chunk.preferenceMatchedKeywords,
+        ]),
+      ),
+    ).slice(0, 8);
     const score =
       typeof rawDimension?.score === "number" &&
       Number.isFinite(rawDimension.score)
@@ -569,16 +581,16 @@ function normalizeDimensionScores(
     result[dimension.key] = {
       score: Math.max(0, Math.min(dimension.maxScore, Math.round(score))),
       maxScore: dimension.maxScore,
-      evidenceIds,
+      evidenceIds: finalEvidenceIds,
       matchedKeywords: Array.isArray(rawDimension?.matchedKeywords)
         ? rawDimension.matchedKeywords.map(String).slice(0, 8)
-        : [],
+        : fallbackMatchedKeywords,
       missingKeywords: Array.isArray(rawDimension?.missingKeywords)
         ? rawDimension.missingKeywords.map(String).slice(0, 8)
         : [],
       missingEvidence: Array.isArray(rawDimension?.missingEvidence)
         ? rawDimension.missingEvidence.map(String).slice(0, 5)
-        : evidenceIds.length
+        : finalEvidenceIds.length
           ? []
           : [`${dimension.label}缺少足够证据。`],
       reasoning:
