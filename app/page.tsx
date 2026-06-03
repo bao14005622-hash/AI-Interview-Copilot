@@ -5,6 +5,10 @@ import {
   SCORE_DIMENSIONS,
   type ScoreBreakdown,
 } from "@/lib/candidate-scoring";
+import type {
+  DimensionEvidenceMap,
+  EvidenceChunk,
+} from "@/lib/evidence-chunks";
 
 type Recommendation = "Yes" | "Maybe" | "No";
 
@@ -19,6 +23,8 @@ type CandidateResult = {
   matchScore: number;
   matchLevel: string;
   scoreBreakdown: ScoreBreakdown;
+  dimensionScores: DimensionEvidenceMap;
+  evidenceChunks: EvidenceChunk[];
   strengths: string[];
   risks: string[];
   recommendation: Recommendation;
@@ -35,6 +41,7 @@ type FailedResume = {
 type ParsedResume = {
   fileName: string;
   text: string;
+  evidenceChunks: EvidenceChunk[];
 };
 
 type BatchAnalysisResult = {
@@ -443,6 +450,7 @@ export default function Home() {
               </div>
 
               <CandidateRankingTable candidates={sortedCandidates} />
+              <EvidenceChainSection candidates={sortedCandidates} />
             </div>
           ) : (
             <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-14 text-center">
@@ -529,6 +537,7 @@ async function parseCandidateFiles(
       parsedResumes.push({
         fileName: payload.fileName,
         text: payload.text,
+        evidenceChunks: payload.evidenceChunks,
       });
       callbacks.onFileParsed(candidateFile.file.name);
     } catch (error) {
@@ -555,6 +564,9 @@ async function parseResumeResponse(response: Response, fallbackFileName: string)
       fileName:
         typeof parsed?.fileName === "string" ? parsed.fileName : fallbackFileName,
       text: typeof parsed?.text === "string" ? parsed.text : "",
+      evidenceChunks: Array.isArray(parsed?.evidenceChunks)
+        ? parsed.evidenceChunks
+        : [],
       error:
         typeof parsed?.error === "string"
           ? parsed.error
@@ -564,6 +576,7 @@ async function parseResumeResponse(response: Response, fallbackFileName: string)
     return {
       fileName: fallbackFileName,
       text: "",
+      evidenceChunks: [],
       error: "简历解析失败，请检查文件是否损坏。",
     };
   }
@@ -627,6 +640,20 @@ function recommendationClass(recommendation: Recommendation) {
   if (recommendation === "Yes") return "bg-emerald-50 text-emerald-700";
   if (recommendation === "Maybe") return "bg-amber-50 text-amber-700";
   return "bg-red-50 text-red-700";
+}
+
+function sectionTypeLabel(sectionType: EvidenceChunk["sectionType"]) {
+  const labels: Record<EvidenceChunk["sectionType"], string> = {
+    education: "教育",
+    internship: "实习",
+    project: "项目",
+    skill: "技能",
+    achievement: "成果",
+    leadership: "协作",
+    other: "其他",
+  };
+
+  return labels[sectionType] || "其他";
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -927,6 +954,152 @@ function CandidateRankingTable({
         ))}
       </div>
     </div>
+  );
+}
+
+function EvidenceChainSection({
+  candidates,
+}: {
+  candidates: CandidateResult[];
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div>
+        <p className="text-sm font-semibold text-emerald-700">评分证据链</p>
+        <h3 className="mt-1 text-xl font-semibold text-slate-950">
+          基于 evidenceIds 的可解释评分
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          每个维度都展示命中的简历证据、缺失证据和评分理由，避免 AI 只给结论。
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        {candidates.map((candidate, index) => (
+          <CandidateEvidenceCard
+            candidate={candidate}
+            index={index}
+            key={`${candidate.fileName}-evidence-${index}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CandidateEvidenceCard({
+  candidate,
+  index,
+}: {
+  candidate: CandidateResult;
+  index: number;
+}) {
+  const evidenceById = new Map(
+    (candidate.evidenceChunks || []).map((chunk) => [chunk.id, chunk]),
+  );
+
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold text-emerald-700">
+            第 {index + 1} 名
+          </p>
+          <h4 className="mt-1 text-lg font-semibold text-slate-950">
+            {candidate.candidateName}
+          </h4>
+          <p className="mt-1 break-all text-xs text-slate-500">
+            {candidate.fileName}
+          </p>
+        </div>
+        <div className="rounded-xl bg-slate-950 px-4 py-3 text-white">
+          <p className="text-2xl font-semibold">{candidate.matchScore}</p>
+          <p className="text-xs text-slate-300">综合分 /100</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {SCORE_DIMENSIONS.map((dimension) => {
+          const dimensionScore = candidate.dimensionScores?.[dimension.key];
+          const evidenceChunks = (dimensionScore?.evidenceIds || [])
+            .map((evidenceId) => evidenceById.get(evidenceId))
+            .filter((chunk): chunk is EvidenceChunk => Boolean(chunk));
+
+          return (
+            <div
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              key={dimension.key}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">
+                    {dimension.label}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    JD / 偏好命中关键词：
+                    {dimensionScore?.matchedKeywords?.length
+                      ? dimensionScore.matchedKeywords.join("、")
+                      : "暂无明确命中"}
+                  </p>
+                </div>
+                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
+                  {dimensionScore?.score ?? 0}/{dimension.maxScore}
+                </span>
+              </div>
+
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-slate-700">
+                  命中简历证据
+                </p>
+                {evidenceChunks.length ? (
+                  <div className="mt-2 grid gap-2">
+                    {evidenceChunks.map((chunk) => (
+                      <blockquote
+                        className="rounded-xl border border-emerald-100 bg-white p-3 text-xs leading-5 text-slate-600"
+                        key={chunk.id}
+                      >
+                        <p className="font-semibold text-emerald-700">
+                          {chunk.id} · {sectionTypeLabel(chunk.sectionType)}
+                        </p>
+                        <p className="mt-1">{chunk.text}</p>
+                      </blockquote>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 rounded-xl border border-amber-100 bg-white p-3 text-xs text-amber-700">
+                    该维度暂无可引用证据。
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-3">
+                <p className="text-xs font-semibold text-slate-700">
+                  缺失证据
+                </p>
+                <TagList
+                  items={
+                    dimensionScore?.missingEvidence?.length
+                      ? dimensionScore.missingEvidence
+                      : ["暂无明显缺失"]
+                  }
+                  tone="risk"
+                />
+              </div>
+
+              {dimensionScore?.missingKeywords?.length ? (
+                <p className="mt-3 text-xs leading-5 text-slate-500">
+                  缺失关键词：{dimensionScore.missingKeywords.join("、")}
+                </p>
+              ) : null}
+
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                {dimensionScore?.reasoning || "该维度需要进一步验证。"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </article>
   );
 }
 

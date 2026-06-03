@@ -5,15 +5,30 @@ import {
   UserFacingError,
 } from "@/lib/resume-parser";
 import {
+  createEvidenceChunks,
+  emptyDimensionEvidenceMap,
+  enrichEvidenceChunks,
+  selectEvidenceByDimension,
+  type DimensionEvidenceMap,
+  type EvidenceChunk,
+} from "@/lib/evidence-chunks";
+import {
   normalizeScoreBreakdown,
   SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE,
   SCORE_DIMENSIONS,
   type ScoreBreakdown,
+  type ScoreBreakdownKey,
 } from "@/lib/candidate-scoring";
 
 type CandidateResume = {
   fileName: string;
   text: string;
+  evidenceChunks?: EvidenceChunk[];
+};
+
+type EvidencePreparedResume = CandidateResume & {
+  evidenceChunks: EvidenceChunk[];
+  evidenceByDimension: Record<ScoreBreakdownKey, EvidenceChunk[]>;
 };
 
 type FailedResume = {
@@ -27,6 +42,8 @@ type CandidateAnalysis = {
   matchScore: number;
   matchLevel: string;
   scoreBreakdown: ScoreBreakdown;
+  dimensionScores: DimensionEvidenceMap;
+  evidenceChunks: EvidenceChunk[];
   strengths: string[];
   risks: string[];
   recommendation: "Yes" | "Maybe" | "No";
@@ -84,6 +101,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const preparedResumes = prepareEvidenceForAnalysis({
+      resumes: requestData.resumes,
+      jobDescription,
+      interviewerPreferences,
+    });
+
     const aiResponse = await fetch(
       `${process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com"}/chat/completions`,
       {
@@ -103,7 +126,7 @@ export async function POST(request: NextRequest) {
             {
               role: "user",
               content: buildBatchAnalysisPrompt({
-                resumes: requestData.resumes,
+                resumes: preparedResumes,
                 jobDescription,
                 interviewerPreferences,
               }),
@@ -137,7 +160,7 @@ export async function POST(request: NextRequest) {
 
     const analysis = parseAndValidateBatchAnalysis(
       rawText,
-      requestData.resumes.map((resume) => resume.fileName),
+      preparedResumes,
     );
 
     return NextResponse.json({
@@ -163,7 +186,7 @@ function buildBatchAnalysisPrompt({
   jobDescription,
   interviewerPreferences,
 }: {
-  resumes: CandidateResume[];
+  resumes: EvidencePreparedResume[];
   jobDescription: string;
   interviewerPreferences: string;
 }) {
@@ -182,7 +205,11 @@ function buildBatchAnalysisPrompt({
       (resume, index) => [
         `候选人 ${index + 1}`,
         `文件名：${resume.fileName}`,
-        "简历文本：",
+        "召回证据 chunks：",
+        formatEvidenceChunksForPrompt(resume.evidenceChunks),
+        "按评分维度召回结果：",
+        formatDimensionEvidenceForPrompt(resume.evidenceByDimension),
+        "完整简历文本摘要：",
         resume.text.slice(0, MAX_RESUME_TEXT_LENGTH),
       ].join("\n"),
     )
@@ -191,6 +218,7 @@ function buildBatchAnalysisPrompt({
   return [
     "请基于同一个岗位 JD 和同一组面试官偏好，对多位候选人进行横向比较、评分和排序。",
     "评分定位：这是一个“面试推荐型”评分，不是基础学历筛选。用户导入简历前已经筛过学历和专业，所以不要让学历、学校、专业主导总分。",
+    "你必须基于 evidence chunks 评分。每个评分维度都必须引用 evidenceIds；如果证据不足，不能给高分。",
     "你必须返回 JSON 对象，不要使用 Markdown，不要包裹代码块。",
     "",
     "总分规则：",
@@ -202,6 +230,8 @@ function buildBatchAnalysisPrompt({
     "- 相关经历包括产品经理实习、运营、数据分析、商业分析、用户研究、增长、战略，或能体现 PRD、用户调研、竞品分析、需求拆解、数据分析、项目推进、业务复盘等能力的项目。",
     "- 面试官偏好只占 15 分，按行优先级递减；它会影响排序，但不能覆盖 JD 相关度和项目证据。",
     "- 不要编造简历中没有的经历、数据或成果。缺少证据时应写入 risks。",
+    "- 如果某个维度没有足够 evidence，missingEvidence 必须明确写出缺少什么，例如“未发现 SQL 使用证据”“未发现用户研究经历”“未发现相关实习经历”。",
+    "- 如果某个维度 evidenceIds 为空，该维度分数不能超过该维度满分的 40%。如果只有 1 条弱证据，该维度分数不能超过该维度满分的 60%。",
     "",
     "JSON 格式必须严格为：",
     "{",
@@ -218,6 +248,14 @@ function buildBatchAnalysisPrompt({
     '        "resumeClarity": number,',
     '        "interviewerPreferenceMatch": number',
     "      },",
+    '      "dimensionScores": {',
+    '        "jobRelevantExperience": { "score": number, "maxScore": 35, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string },',
+    '        "projectEvidenceStrength": { "score": number, "maxScore": 25, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string },',
+    '        "transferableCapability": { "score": number, "maxScore": 15, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string },',
+    '        "resumeClarity": { "score": number, "maxScore": 10, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string },',
+    '        "interviewerPreferenceMatch": { "score": number, "maxScore": 15, "evidenceIds": string[], "matchedKeywords": string[], "missingKeywords": string[], "missingEvidence": string[], "reasoning": string }',
+    "      },",
+    '      "evidenceChunks": EvidenceChunk[],',
     '      "strengths": string[],',
     '      "risks": string[],',
     '      "recommendation": "Yes" | "Maybe" | "No",',
@@ -235,6 +273,9 @@ function buildBatchAnalysisPrompt({
     "- fileName 必须使用输入中的原始文件名。",
     "- matchScore 必须是 0 到 100 的数字。",
     "- scoreBreakdown 中每一项不能超过对应维度满分。",
+    "- dimensionScores 中每个维度的 score 必须和 scoreBreakdown 对应字段一致。",
+    "- dimensionScores 中每个 evidenceIds 只能引用输入 evidence chunks 中存在的 id。",
+    "- evidenceChunks 返回本候选人实际用于评分的证据 chunks，不要返回输入之外的新 chunk。",
     `- capTriggered 为 true 时，matchScore 必须小于等于 ${SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE}，capReason 必须说明缺少相关实习或项目经历。`,
     "- capTriggered 为 false 时，capReason 返回空字符串。",
     "- 85-100 分 recommendation 为 Yes；75-84 分通常为 Maybe；60-74 分为 Maybe 或 No；0-59 分为 No。",
@@ -254,7 +295,7 @@ function buildBatchAnalysisPrompt({
 
 function parseAndValidateBatchAnalysis(
   rawText: string,
-  fileNames: string[],
+  resumes: EvidencePreparedResume[],
 ): Omit<BatchAnalysis, "failedResumes"> {
   const jsonText = rawText
     .trim()
@@ -268,7 +309,7 @@ function parseAndValidateBatchAnalysis(
   }
 
   const candidates = analysis.candidates.map((candidate, index) =>
-    normalizeCandidateAnalysis(candidate, fileNames[index], index),
+    normalizeCandidateAnalysis(candidate, resumes[index], index),
   );
 
   return {
@@ -278,7 +319,7 @@ function parseAndValidateBatchAnalysis(
 
 function normalizeCandidateAnalysis(
   candidate: Partial<CandidateAnalysis>,
-  fallbackFileName: string,
+  fallbackResume: EvidencePreparedResume,
   index: number,
 ): CandidateAnalysis {
   if (
@@ -295,6 +336,11 @@ function normalizeCandidateAnalysis(
 
   const recommendation = normalizeRecommendation(candidate.recommendation);
   const scoreBreakdown = normalizeScoreBreakdown(candidate.scoreBreakdown);
+  const dimensionScores = normalizeDimensionScores(
+    candidate.dimensionScores,
+    scoreBreakdown,
+    fallbackResume.evidenceChunks,
+  );
   const capTriggered = candidate.capTriggered === true;
   const rawMatchScore = Math.max(
     0,
@@ -310,7 +356,7 @@ function normalizeCandidateAnalysis(
     fileName:
       typeof candidate.fileName === "string" && candidate.fileName.trim()
         ? candidate.fileName.trim()
-        : fallbackFileName,
+        : fallbackResume.fileName,
     matchScore: capTriggered
       ? Math.min(rawMatchScore, SCORE_CAP_WITHOUT_RELEVANT_EXPERIENCE)
       : rawMatchScore,
@@ -319,6 +365,12 @@ function normalizeCandidateAnalysis(
         ? candidate.matchLevel.trim()
         : "Medium Match",
     scoreBreakdown,
+    dimensionScores,
+    evidenceChunks: normalizeReferencedEvidenceChunks(
+      candidate.evidenceChunks,
+      fallbackResume.evidenceChunks,
+      dimensionScores,
+    ),
     strengths: candidate.strengths.map(String).slice(0, 4),
     risks: candidate.risks.map(String).slice(0, 4),
     recommendation,
@@ -396,11 +448,13 @@ async function readAnalyzeRequest(request: NextRequest) {
   const parseResults = await Promise.all(
     resumeFiles.map(async (file) => {
       try {
+        const text = await extractResumeText(file);
         return {
           status: "success" as const,
           resume: {
             fileName: file.name,
-            text: await extractResumeText(file),
+            text,
+            evidenceChunks: createEvidenceChunks(file.name, text),
           },
         };
       } catch (error) {
@@ -432,4 +486,142 @@ async function readAnalyzeRequest(request: NextRequest) {
 function getFormString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
+}
+
+function prepareEvidenceForAnalysis({
+  resumes,
+  jobDescription,
+  interviewerPreferences,
+}: {
+  resumes: CandidateResume[];
+  jobDescription: string;
+  interviewerPreferences: string;
+}): EvidencePreparedResume[] {
+  return resumes.map((resume) => {
+    const baseChunks = resume.evidenceChunks?.length
+      ? resume.evidenceChunks
+      : createEvidenceChunks(resume.fileName, resume.text);
+    const enrichedChunks = enrichEvidenceChunks({
+      chunks: baseChunks,
+      jobDescription,
+      interviewerPreferences,
+    });
+    const { selectedByDimension, selectedChunks } =
+      selectEvidenceByDimension(enrichedChunks);
+
+    return {
+      ...resume,
+      evidenceChunks: selectedChunks,
+      evidenceByDimension: selectedByDimension,
+    };
+  });
+}
+
+function formatEvidenceChunksForPrompt(chunks: EvidenceChunk[]) {
+  if (!chunks.length) return "未召回到证据片段。";
+
+  return chunks
+    .map(
+      (chunk) =>
+        [
+          `id: ${chunk.id}`,
+          `sectionType: ${chunk.sectionType}`,
+          `relevanceScore: ${chunk.relevanceScore}`,
+          `jdMatchedKeywords: ${chunk.jdMatchedKeywords.join(", ") || "无"}`,
+          `preferenceMatchedKeywords: ${
+            chunk.preferenceMatchedKeywords.join(", ") || "无"
+          }`,
+          `text: ${chunk.text}`,
+        ].join("\n"),
+    )
+    .join("\n\n");
+}
+
+function formatDimensionEvidenceForPrompt(
+  evidenceByDimension: Record<ScoreBreakdownKey, EvidenceChunk[]>,
+) {
+  return SCORE_DIMENSIONS.map((dimension) => {
+    const chunks = evidenceByDimension[dimension.key] || [];
+    const evidenceIds = chunks.map((chunk) => chunk.id).join(", ") || "无";
+    return `${dimension.label}(${dimension.key}, ${dimension.maxScore}分): ${evidenceIds}`;
+  }).join("\n");
+}
+
+function normalizeDimensionScores(
+  value: unknown,
+  scoreBreakdown: ScoreBreakdown,
+  availableEvidenceChunks: EvidenceChunk[],
+): DimensionEvidenceMap {
+  const source =
+    typeof value === "object" && value !== null
+      ? (value as Partial<DimensionEvidenceMap>)
+      : {};
+  const availableIds = new Set(availableEvidenceChunks.map((chunk) => chunk.id));
+
+  return SCORE_DIMENSIONS.reduce<DimensionEvidenceMap>((result, dimension) => {
+    const rawDimension = source[dimension.key];
+    const rawEvidenceIds = Array.isArray(rawDimension?.evidenceIds)
+      ? rawDimension.evidenceIds.map(String)
+      : [];
+    const evidenceIds = rawEvidenceIds.filter((id) => availableIds.has(id));
+    const score =
+      typeof rawDimension?.score === "number" &&
+      Number.isFinite(rawDimension.score)
+        ? rawDimension.score
+        : scoreBreakdown[dimension.key];
+
+    result[dimension.key] = {
+      score: Math.max(0, Math.min(dimension.maxScore, Math.round(score))),
+      maxScore: dimension.maxScore,
+      evidenceIds,
+      matchedKeywords: Array.isArray(rawDimension?.matchedKeywords)
+        ? rawDimension.matchedKeywords.map(String).slice(0, 8)
+        : [],
+      missingKeywords: Array.isArray(rawDimension?.missingKeywords)
+        ? rawDimension.missingKeywords.map(String).slice(0, 8)
+        : [],
+      missingEvidence: Array.isArray(rawDimension?.missingEvidence)
+        ? rawDimension.missingEvidence.map(String).slice(0, 5)
+        : evidenceIds.length
+          ? []
+          : [`${dimension.label}缺少足够证据。`],
+      reasoning:
+        typeof rawDimension?.reasoning === "string" &&
+        rawDimension.reasoning.trim()
+          ? rawDimension.reasoning.trim()
+          : "该维度需要在面试中进一步验证。",
+    };
+
+    return result;
+  }, emptyDimensionEvidenceMap());
+}
+
+function normalizeReferencedEvidenceChunks(
+  value: unknown,
+  fallbackEvidenceChunks: EvidenceChunk[],
+  dimensionScores: DimensionEvidenceMap,
+) {
+  const fallbackById = new Map(
+    fallbackEvidenceChunks.map((chunk) => [chunk.id, chunk]),
+  );
+  const referencedIds = new Set(
+    SCORE_DIMENSIONS.flatMap(
+      (dimension) => dimensionScores[dimension.key].evidenceIds,
+    ),
+  );
+  const aiChunks = Array.isArray(value) ? value : [];
+  const aiChunkById = new Map(
+    aiChunks
+      .filter(
+        (chunk): chunk is EvidenceChunk =>
+          typeof chunk === "object" &&
+          chunk !== null &&
+          typeof (chunk as EvidenceChunk).id === "string",
+      )
+      .map((chunk) => [chunk.id, chunk]),
+  );
+
+  return Array.from(referencedIds)
+    .map((id) => aiChunkById.get(id) || fallbackById.get(id))
+    .filter((chunk): chunk is EvidenceChunk => Boolean(chunk));
 }

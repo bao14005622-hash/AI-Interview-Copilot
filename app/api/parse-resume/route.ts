@@ -3,6 +3,7 @@ import {
   extractResumeText,
   getParseErrorMessage,
 } from "@/lib/resume-parser";
+import { createEvidenceChunks } from "@/lib/evidence-chunks";
 
 export const runtime = "nodejs";
 
@@ -19,10 +20,12 @@ export async function POST(request: NextRequest) {
     }
 
     const text = await extractResumeText(resumeFile);
+    const evidenceChunks = createEvidenceChunks(resumeFile.name, text);
 
     return NextResponse.json({
       fileName: resumeFile.name,
       text,
+      evidenceChunks,
     });
   } catch (error) {
     return NextResponse.json(
