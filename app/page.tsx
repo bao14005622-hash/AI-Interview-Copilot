@@ -10,10 +10,6 @@ import type {
   EvidenceChunk,
 } from "@/lib/evidence-chunks";
 import type { AgentFlowStep } from "@/lib/agent-flow";
-import {
-  getDisplayEvidenceItems,
-  type DisplayEvidenceItem,
-} from "@/lib/evidence-display";
 
 type Recommendation = "Yes" | "Maybe" | "No";
 
@@ -999,7 +995,7 @@ function CandidateDetail({ candidate }: { candidate: CandidateResult }) {
             五维评分与证据解释
           </h4>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            展示影响评分的命中证据、缺失证据和简短评分理由。
+            展示影响评分的缺失证据、缺失关键词和简短评分理由。
           </p>
         </div>
         <div className="rounded-xl bg-slate-950 px-4 py-3 text-white">
@@ -1014,7 +1010,6 @@ function CandidateDetail({ candidate }: { candidate: CandidateResult }) {
 
           return (
             <DimensionDetailCard
-              candidate={candidate}
               dimension={dimension}
               dimensionScore={dimensionScore}
               key={dimension.key}
@@ -1041,19 +1036,12 @@ function CandidateDetail({ candidate }: { candidate: CandidateResult }) {
 }
 
 function DimensionDetailCard({
-  candidate,
   dimension,
   dimensionScore,
 }: {
-  candidate: CandidateResult;
   dimension: (typeof SCORE_DIMENSIONS)[number];
   dimensionScore?: DimensionEvidenceMap[keyof DimensionEvidenceMap];
 }) {
-  const hitEvidence = getDisplayEvidenceItems(
-    candidate.evidenceChunks || [],
-    dimensionScore?.evidenceIds || [],
-  );
-
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -1062,42 +1050,12 @@ function DimensionDetailCard({
             {dimension.label}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            命中证据 {hitEvidence.length} 条
+            仅展示缺失项和评分理由
           </p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-800 shadow-sm">
           {dimensionScore?.score ?? 0}/{dimension.maxScore}
         </span>
-      </div>
-
-      <div className="mt-3">
-        <p className="text-xs font-semibold text-slate-700">命中证据</p>
-        {hitEvidence.length ? (
-          <div className="mt-2 grid gap-2">
-            {hitEvidence.map((evidence) => (
-              <div
-                className="rounded-xl border border-emerald-100 bg-white px-3 py-2"
-                key={evidence.id}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-                    {sectionTypeLabel(evidence.sectionType)}
-                  </span>
-                  <span className="text-sm font-semibold text-slate-900">
-                    {evidence.title}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  关键词：{evidence.keywords.join("、") || "暂无明确关键词"}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-2 rounded-xl border border-amber-100 bg-white px-3 py-2 text-sm text-amber-700">
-            该维度暂无可引用证据。
-          </p>
-        )}
       </div>
 
       <div className="mt-3">
@@ -1173,20 +1131,6 @@ function AgentFlowTimeline({ steps }: { steps: AgentFlowStep[] }) {
       </div>
     </div>
   );
-}
-
-function sectionTypeLabel(sectionType: DisplayEvidenceItem["sectionType"]) {
-  const labels: Record<DisplayEvidenceItem["sectionType"], string> = {
-    education: "教育",
-    internship: "实习",
-    project: "项目",
-    skill: "技能",
-    achievement: "成果",
-    leadership: "组织",
-    other: "其他",
-  };
-
-  return labels[sectionType] || "其他";
 }
 
 function agentStatusLabel(status: AgentFlowStep["status"]) {

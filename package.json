@@ -8,8 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:evidence": "tsx --test tests/evidence-chunks.test.ts",
-    "test:agent-flow": "tsx --test tests/agent-flow.test.ts",
-    "test:evidence-display": "tsx --test tests/evidence-display.test.ts"
+    "test:agent-flow": "tsx --test tests/agent-flow.test.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.0",
