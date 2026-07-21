@@ -1,6 +1,6 @@
 # AI Interview Copilot
 
-> 🔗 **[在线体验 Live Demo](https://ai-interview-copilot.netlify.app)** · 部署即用，上传简历即可分析
+> 🔗 **[在线体验 Live Demo](https://stately-starlight-6574dc.netlify.app)** · 部署即用，上传简历即可分析
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
