@@ -2,6 +2,8 @@
   "name": "ai-interview-copilot",
   "version": "0.1.0",
   "private": true,
+  "description": "AI 候选人批量分析与排序工具 — 上传简历 + JD，DeepSeek 五维评分，自动排序",
+  "homepage": "https://ai-interview-copilot.netlify.app",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

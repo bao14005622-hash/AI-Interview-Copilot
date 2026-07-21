@@ -1,5 +1,16 @@
 # AI Interview Copilot
 
+> 🔗 **[在线体验 Live Demo](https://ai-interview-copilot.netlify.app)** · 部署即用，上传简历即可分析
+
+![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss)
+![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-4D6BFE)
+![Netlify](https://img.shields.io/badge/Deploy-Netlify-00C7B7?logo=netlify)
+
+---
+
 面向 HR 实习生与招聘团队的 AI 候选人批量分析与排序工具。
 
 系统支持一次上传多份 PDF 或 DOCX 简历，并结合岗位 JD 与面试官偏好优先级，通过 DeepSeek 生成统一的候选人匹配评分、推荐程度、核心优势与主要风险，帮助招聘人员更快识别值得进入面试的候选人。
